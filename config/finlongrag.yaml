@@ -1,0 +1,43 @@
+model:
+  provider: qwen
+  name: qwen-plus
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  temperature: 0.0
+  answer_max_tokens: 768
+  request_timeout_seconds: 120
+  max_retries: 2
+
+retrieval:
+  tokenizer_mode: mixed
+  top_k_per_query: 24
+  fused_top_k: 40
+  evidence_top_k: 8
+  max_evidence_chars: 12000
+  blind_top_docs: 8
+  scoring_mode: bm25f
+  enable_vector_retrieval: true
+  vector_embedding_provider: dashscope
+  vector_embedding_model: text-embedding-v4
+  vector_dimension: 1024
+  vector_batch_size: 16
+  vector_store: faiss
+  bm25_channel_weight: 1.0
+  vector_channel_weight: 0.65
+
+rerank:
+  provider: dashscope
+  model: qwen3-rerank
+  base_url: https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank
+  top_k_multiplier: 4
+
+reasoning:
+  mode: claim_verification
+  enable_parent_context: true
+  parent_window_chars: 900
+  evidence_per_claim: 4
+  evidence_chars_per_claim: 3200
+
+paths:
+  processed_dir: data/processed
+  index_dir: data/index
+  output_dir: output

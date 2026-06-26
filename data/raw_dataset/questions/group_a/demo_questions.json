@@ -1,0 +1,32 @@
+[
+  {
+    "qid": "demo_fin_a_001",
+    "domain": "financial_reports",
+    "split": "demo",
+    "question": "根据示例科技连续两年的年度报告，下列关于公司经营业绩变化的描述中，哪些是准确的？",
+    "options": {
+      "A": "2025 年营业收入较 2024 年实现增长",
+      "B": "2025 年归属于上市公司股东的净利润出现下滑",
+      "C": "2025 年经营活动产生的现金流量净额低于 2024 年",
+      "D": "2025 年研发投入占营业收入的比例较 2024 年有所下降"
+    },
+    "answer_format": "multi",
+    "type": "财务指标对比分析",
+    "doc_ids": [
+      "demo_company_2024",
+      "demo_company_2025"
+    ]
+  },
+  {
+    "qid": "demo_fin_a_002",
+    "domain": "financial_reports",
+    "split": "demo",
+    "question": "示例科技 2025 年营业收入、净利润和经营活动现金流相比 2024 年分别有什么变化？",
+    "answer_format": "open",
+    "type": "开放式财务问答",
+    "doc_ids": [
+      "demo_company_2024",
+      "demo_company_2025"
+    ]
+  }
+]
