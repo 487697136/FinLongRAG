@@ -1,11 +1,11 @@
 <template>
   <div class="settings-page page-shell">
-    <PageHeader title="系统设置" description="管理账户信息、模型密钥与后端运行环境状态。"></PageHeader>
+    <PageHeader title="系统设置" description="管理账户信息、模型密钥与系统运行环境状态。"></PageHeader>
 
     <div class="settings-overview-grid">
-      <InfoCard label="图谱后端" :value="graphBackendLabel" :caption="graphBackendCaption" tone="info" />
-      <InfoCard label="上传限制" :value="uploadLimitLabel" caption="当前允许上传的最大文件大小" tone="muted" />
+      <InfoCard label="上传限制" :value="uploadLimitLabel" caption="当前允许上传的最大文件大小" tone="info" />
       <InfoCard label="已配置密钥" :value="providerStore.configuredKeys.length" caption="当前账号下已配置的所有密钥数量" tone="muted" />
+      <InfoCard label="模型服务商" :value="providerStore.llmProviders.length" caption="已注册的 LLM 服务商数量" tone="muted" />
     </div>
 
     <div class="settings-layout">
@@ -136,10 +136,9 @@
 
           <template v-else-if="activeSettingSection === 'runtime'">
             <div class="detail-meta-list">
-              <div class="detail-meta-item"><span>图谱后端</span><strong>{{ graphBackendLabel }}</strong></div>
+              <div class="detail-meta-item"><span>系统状态</span><strong>{{ runtimeStatus?.status || '运行中' }}</strong></div>
               <div class="detail-meta-item"><span>允许扩展名</span><strong>{{ allowedExtensionsLabel }}</strong></div>
-              <div v-if="runtimeStatus?.neo4j?.configured" class="detail-meta-item"><span>Neo4j 状态</span><strong>{{ neo4jConnected ? '已连接' : '不可用' }}</strong></div>
-              <div v-if="runtimeStatus?.neo4j?.url" class="detail-meta-item"><span>Neo4j 地址</span><strong>{{ runtimeStatus.neo4j.url }}</strong></div>
+              <div class="detail-meta-item"><span>上传限制</span><strong>{{ uploadLimitLabel }}</strong></div>
               <div class="detail-meta-item detail-meta-item--full"><span>工作区根目录</span><strong>{{ runtimeStatus?.paths?.workspace_root || '--' }}</strong></div>
               <div class="detail-meta-item detail-meta-item--full"><span>上传目录</span><strong>{{ runtimeStatus?.paths?.upload_root || '--' }}</strong></div>
             </div>
@@ -184,28 +183,14 @@ const runtimeStatus = ref(null)
 const settingSections = [
   { key: 'account', label: '账户信息', description: '查看当前登录账号的基础资料。' },
   { key: 'providers', label: '模型密钥', description: '管理 LLM 与嵌入模型服务商 API Key。' },
-  { key: 'runtime', label: '运行状态', description: '查看图谱后端、上传限制和目录配置。' },
+  { key: 'runtime', label: '运行状态', description: '查看系统运行状态与目录配置。' },
   { key: 'security', label: '安全设置', description: '修改当前账号密码。' }
 ]
 
 const passwordForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
 const currentSection = computed(() => settingSections.find((item) => item.key === activeSettingSection.value))
-const neo4jConnected = computed(() => Boolean(runtimeStatus.value?.neo4j?.connected))
 const uploadLimitLabel = computed(() => formatBytes(runtimeStatus.value?.upload?.max_upload_size || 0))
 const allowedExtensionsLabel = computed(() => (runtimeStatus.value?.upload?.allowed_extensions || []).join(', ') || '--')
-const graphBackendLabel = computed(() => {
-  const requested = runtimeStatus.value?.graph_backend_requested
-  if (!requested) return '--'
-  if (requested === 'networkx') return 'NetworkX（本地图谱）'
-  if (requested === 'neo4j') return neo4jConnected.value ? 'Neo4j（已连接）' : 'Neo4j（未连接）'
-  return requested
-})
-const graphBackendCaption = computed(() => {
-  const requested = runtimeStatus.value?.graph_backend_requested
-  if (requested === 'neo4j' && !neo4jConnected.value) return 'Neo4j 未连接，将自动回退到本地图谱'
-  if (requested === 'networkx') return '使用本地 NetworkX 存储图谱数据'
-  return '当前图谱存储后端'
-})
 
 // Key modal state
 const showKeyModal = ref(false)

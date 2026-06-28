@@ -74,7 +74,7 @@ defineProps({
 
 .info-card--info::before {
   opacity: 1;
-  background: linear-gradient(90deg, #2563eb, #60a5fa);
+  background: linear-gradient(90deg, var(--brand-600), var(--brand-400));
 }
 
 .info-card:hover::before {
@@ -94,11 +94,11 @@ defineProps({
 }
 
 .info-card--info {
-  background: linear-gradient(180deg, #fbfdff 0%, #f0f7ff 100%);
+  background: var(--surface-soft);
 }
 
 .info-card--muted {
-  background: linear-gradient(180deg, #fbfcfe 0%, #f7f9fc 100%);
+  background: var(--surface-muted);
 }
 
 .info-card__top {

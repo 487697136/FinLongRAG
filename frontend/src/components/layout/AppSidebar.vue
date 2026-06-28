@@ -33,7 +33,7 @@
       :title="sidebarCollapsed ? '展开导航' : '收起导航'"
       @click="toggleSidebar"
     >
-      {{ sidebarCollapsed ? '禄' : '芦' }}
+      <n-icon size="14" :component="sidebarCollapsed ? ChevronForwardOutline : ChevronBackOutline" />
     </button>
 
     <!-- Navigation -->
@@ -105,9 +105,10 @@ import {
   AddOutline,
   AnalyticsOutline,
   ChatbubblesOutline,
+  ChevronBackOutline,
+  ChevronForwardOutline,
   DocumentTextOutline,
   ExitOutline,
-  GitNetworkOutline,
   LibraryOutline,
   SettingsOutline,
   TimeOutline
@@ -179,7 +180,6 @@ const primaryNav = [
 const secondaryNav = [
   { label: '知识库中心', path: '/knowledge', icon: LibraryOutline },
   { label: '文档中心', path: '/documents', icon: DocumentTextOutline },
-  { label: '知识图谱', path: '/graph', icon: GitNetworkOutline },
   { label: '测试集管理', path: '/test-sets', icon: DocumentTextOutline },
   { label: '评测中心', path: '/evaluations', icon: AnalyticsOutline }
 ]
@@ -206,31 +206,32 @@ const handleNavigate = (targetPath) => {
   overflow: hidden;
 }
 
-/* Mini collapse toggle */
+/* ─── Collapse toggle ─── */
 .app-sidebar__collapse-mini {
   position: absolute;
   top: 18px;
   right: 10px;
-  width: 28px;
-  height: 28px;
-  border-radius: 9px;
-  border: 1px solid rgba(255,255,255,0.10);
-  background: rgba(255,255,255,0.04);
-  color: rgba(226,232,240,0.92);
+  z-index: 2;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  color: rgba(226,232,240,0.7);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+  transition: all 0.2s ease;
 }
 
 .app-sidebar__collapse-mini:hover {
-  background: rgba(255,255,255,0.07);
-  border-color: rgba(255,255,255,0.14);
-  transform: translateY(-1px);
+  background: rgba(255,255,255,0.10);
+  border-color: rgba(255,255,255,0.16);
+  color: #e2e8f0;
 }
 
-/* Collapsed state: icon-first, keep tooltips via title */
+/* ─── Collapsed state ─── */
 .app-sidebar--collapsed {
   width: 72px;
   padding: 14px 10px 14px;
@@ -240,65 +241,27 @@ const handleNavigate = (targetPath) => {
   padding: 6px 6px;
   justify-content: center;
 }
-
-.app-sidebar--collapsed .app-sidebar__brand-copy {
-  display: none;
-}
-
-.app-sidebar--collapsed .app-sidebar__new-chat {
-  justify-content: center;
-  padding: 10px 10px;
-}
-
-.app-sidebar--collapsed .app-sidebar__new-chat-text {
-  display: none;
-}
-
-/* Mini toggle remains visible in collapsed state */
-
-.app-sidebar--collapsed .app-sidebar__nav-label {
-  display: none;
-}
-
-.app-sidebar--collapsed .app-sidebar__nav-item {
-  justify-content: center;
-  padding: 9px 8px;
-}
-
-.app-sidebar--collapsed .app-sidebar__nav-item span {
-  display: none;
-}
-
-.app-sidebar--collapsed .app-sidebar__nav-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-}
-
-.app-sidebar--collapsed .app-sidebar__nav-indicator {
-  right: -2px;
-  width: 2px;
-  height: 18px;
-}
-
-.app-sidebar--collapsed .app-sidebar__footer {
-  justify-content: center;
-  padding: 10px 6px;
-}
-
+.app-sidebar--collapsed .app-sidebar__brand-copy { display: none; }
+.app-sidebar--collapsed .app-sidebar__new-chat { justify-content: center; padding: 10px 10px; }
+.app-sidebar--collapsed .app-sidebar__new-chat-text { display: none; }
+.app-sidebar--collapsed .app-sidebar__nav-label { display: none; }
+.app-sidebar--collapsed .app-sidebar__nav-item { justify-content: center; padding: 10px 8px; }
+.app-sidebar--collapsed .app-sidebar__nav-item span { display: none; }
+.app-sidebar--collapsed .app-sidebar__nav-icon { width: 36px; height: 36px; border-radius: 10px; }
+.app-sidebar--collapsed .app-sidebar__nav-indicator { right: -3px; width: 2px; height: 18px; }
+.app-sidebar--collapsed .app-sidebar__footer { justify-content: center; padding: 10px 6px; }
 .app-sidebar--collapsed .app-sidebar__user,
-.app-sidebar--collapsed .app-sidebar__footer-icon {
-  display: none;
-}
+.app-sidebar--collapsed .app-sidebar__footer-icon { display: none; }
 
+/* ─── Decorative glow ─── */
 .app-sidebar::before {
   content: '';
   position: absolute;
-  top: -80px;
-  right: -80px;
-  width: 220px;
-  height: 220px;
-  background: radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 70%);
+  top: -60px;
+  right: -60px;
+  width: 240px;
+  height: 240px;
+  background: radial-gradient(circle, rgba(59,130,246,0.10) 0%, transparent 70%);
   pointer-events: none;
 }
 
@@ -308,14 +271,14 @@ const handleNavigate = (targetPath) => {
   padding-top: 16px;
 }
 
-/* Brand */
+/* ─── Brand ─── */
 .app-sidebar__brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 8px;
+  padding: 8px 8px;
   cursor: pointer;
-  border-radius: 10px;
+  border-radius: 12px;
   transition: background 0.18s ease;
   margin-bottom: 8px;
 }
@@ -328,17 +291,17 @@ const handleNavigate = (targetPath) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #60a5fa 0%, #93c5fd 100%);
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 50%, #93c5fd 100%);
   flex-shrink: 0;
-  box-shadow: 0 4px 16px rgba(96,165,250,0.28);
+  box-shadow: 0 6px 20px rgba(59,130,246,0.35), 0 0 30px rgba(59,130,246,0.12);
 }
 
 .app-sidebar__logo-img {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 12px;
   object-fit: cover;
   user-select: none;
@@ -355,45 +318,51 @@ const handleNavigate = (targetPath) => {
 .app-sidebar__brand-subtitle {
   margin-top: 1px;
   font-size: 11px;
-  color: rgba(148,163,184,0.8);
-  letter-spacing: 0.3px;
+  color: rgba(148,163,184,0.75);
 }
 
-/* New chat */
+/* ─── New chat button ─── */
 .app-sidebar__new-chat {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   width: 100%;
   padding: 10px 12px;
   margin-bottom: 8px;
-  border: 1px dashed rgba(59,130,246,0.4);
+  border: 1.5px solid rgba(59,130,246,0.28);
   border-radius: 10px;
   background: rgba(59,130,246,0.08);
   color: #60a5fa;
   font-size: 13.5px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: all 0.22s ease;
 }
 
 .app-sidebar__new-chat:hover {
-  background: rgba(59,130,246,0.15);
-  border-color: rgba(59,130,246,0.6);
+  background: rgba(59,130,246,0.16);
+  border-color: rgba(96,165,250,0.55);
   color: #93c5fd;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(59,130,246,0.18);
 }
 
 .app-sidebar__new-chat-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: rgba(59,130,246,0.2);
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: rgba(59,130,246,0.20);
+  transition: transform 0.22s ease;
 }
 
-/* Navigation */
+.app-sidebar__new-chat:hover .app-sidebar__new-chat-icon {
+  transform: rotate(90deg);
+}
+
+/* ─── Navigation ─── */
 .app-sidebar__nav {
   display: flex;
   flex-direction: column;
@@ -412,86 +381,88 @@ const handleNavigate = (targetPath) => {
 
 .app-sidebar__nav-label {
   font-size: 10.5px;
-  font-weight: 600;
-  color: rgba(148,163,184,0.5);
+  font-weight: 700;
+  color: rgba(148,163,184,0.45);
   text-transform: uppercase;
-  letter-spacing: 0.8px;
+  letter-spacing: 1px;
   padding: 0 12px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .app-sidebar__nav-item {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   width: 100%;
-  padding: 9px 12px;
+  padding: 10px 12px;
   border: none;
-  border-radius: 9px;
+  border-radius: 10px;
   background: transparent;
-  color: rgba(148,163,184,0.85);
+  color: rgba(148,163,184,0.82);
   font-size: 13.5px;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: all 0.16s ease;
+  transition: all 0.18s ease;
 }
 
 .app-sidebar__nav-item:hover {
-  background: rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.06);
   color: #e2e8f0;
 }
 
 .app-sidebar__nav-item.is-active {
-  background: rgba(59,130,246,0.15);
+  background: rgba(59,130,246,0.14);
   color: #93c5fd;
+  font-weight: 600;
 }
 
 .app-sidebar__nav-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  background: rgba(255,255,255,0.06);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.05);
   flex-shrink: 0;
-  transition: all 0.16s ease;
+  transition: all 0.18s ease;
 }
 
 .app-sidebar__nav-item.is-active .app-sidebar__nav-icon {
-  background: rgba(59,130,246,0.25);
+  background: rgba(59,130,246,0.22);
   color: #60a5fa;
+  box-shadow: 0 2px 10px rgba(59,130,246,0.18);
 }
 
 .app-sidebar__nav-indicator {
   position: absolute;
-  right: 0;
+  left: 0;
   top: 50%;
   transform: translateY(-50%);
   width: 3px;
-  height: 20px;
-  background: #3b82f6;
-  border-radius: 3px 0 0 3px;
+  height: 22px;
+  background: linear-gradient(180deg, #3b82f6, #60a5fa);
+  border-radius: 0 3px 3px 0;
 }
 
-/* User footer */
+/* ─── User footer ─── */
 .app-sidebar__footer {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 8px;
+  padding: 8px 8px 8px 10px;
   margin-top: auto;
-  border-top: 1px solid rgba(255,255,255,0.07);
+  border-top: 1px solid rgba(255,255,255,0.06);
   padding-top: 14px;
-  border-radius: 10px;
+  border-radius: 12px;
   cursor: pointer;
-  transition: background 0.16s ease;
+  transition: background 0.18s ease;
 }
 
 .app-sidebar__footer:hover {
-  background: rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.05);
 }
 
 .app-sidebar__avatar-wrap {
@@ -503,25 +474,25 @@ const handleNavigate = (targetPath) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
-  box-shadow: 0 2px 8px rgba(99,102,241,0.3);
+  box-shadow: 0 3px 12px rgba(99,102,241,0.36);
 }
 
 .app-sidebar__status-dot {
   position: absolute;
   bottom: 1px;
   right: 1px;
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: #22c55e;
-  border: 2px solid #0f1629;
+  border: 2.5px solid #0f1629;
 }
 
 .app-sidebar__user {
@@ -539,9 +510,9 @@ const handleNavigate = (targetPath) => {
 }
 
 .app-sidebar__user-role {
-  margin-top: 1px;
+  margin-top: 2px;
   font-size: 11px;
-  color: rgba(148,163,184,0.6);
+  color: rgba(148,163,184,0.55);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -549,6 +520,11 @@ const handleNavigate = (targetPath) => {
 
 .app-sidebar__footer-icon {
   flex-shrink: 0;
-  color: rgba(148,163,184,0.5);
+  color: rgba(148,163,184,0.4);
+  transition: color 0.18s ease;
+}
+
+.app-sidebar__footer:hover .app-sidebar__footer-icon {
+  color: rgba(148,163,184,0.7);
 }
 </style>

@@ -134,6 +134,7 @@ import {
   getKnowledgeBases,
   getTestSets
 } from '@/api/zhiyuan'
+import { evalFormatDate, evalFormatNumber, evalFormatPercent, evalStatusLabel, evalStatusType, evalStrategyLabel } from '@/utils/formatters'
 
 const router = useRouter()
 const message = useMessage()
@@ -204,7 +205,7 @@ const columns = [
     title: '策略',
     key: 'strategy',
     width: 130,
-    render: (row) => strategyLabel(row.strategy)
+    render: (row) => evalStrategyLabel(row.strategy)
   },
   { title: 'Top-K', key: 'top_k', width: 80 },
   {
@@ -213,7 +214,7 @@ const columns = [
     width: 190,
     render: (row) => {
       const nodes = [
-        h(NTag, { type: statusType(row.status), size: 'small' }, { default: () => statusLabel(row.status) })
+        h(NTag, { type: evalStatusType(row.status), size: 'small' }, { default: () => evalStatusLabel(row.status) })
       ]
       if (row.status === 'running') {
         const percentage = row.progress_total
@@ -231,14 +232,14 @@ const columns = [
     render: (row) => {
       if (row.status !== 'done') return '-'
       const metrics = row.metrics || {}
-      return `Recall ${formatPercent(metrics.recall)} / MRR ${formatNumber(metrics.mrr)}`
+      return `Recall ${evalFormatPercent(metrics.recall)} / MRR ${evalFormatNumber(metrics.mrr)}`
     }
   },
   {
     title: '创建时间',
     key: 'created_at',
     width: 180,
-    render: (row) => formatDate(row.created_at)
+    render: (row) => evalFormatDate(row.created_at)
   },
   {
     title: '操作',
@@ -327,41 +328,11 @@ async function handleDelete(id) {
   }
 }
 
-function statusType(status) {
-  if (status === 'done') return 'success'
-  if (status === 'failed') return 'error'
-  if (status === 'running') return 'info'
-  return 'default'
-}
-
-function statusLabel(status) {
-  const map = { running: '运行中', done: '已完成', failed: '失败' }
-  return map[status] || status || '-'
-}
-
-function strategyLabel(strategy) {
-  const map = { hybrid: '混合检索', bm25: 'BM25F', vector: '向量检索' }
-  return map[strategy] || strategy || '-'
-}
-
-function formatPercent(value) {
-  if (typeof value !== 'number') return '-'
-  return `${(value * 100).toFixed(1)}%`
-}
-
-function formatNumber(value) {
-  if (typeof value !== 'number') return '-'
-  return value.toFixed(4)
-}
-
-function formatDate(value) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString('zh-CN')
-}
-
 onMounted(async () => {
   await loadAll()
-  pollTimer = window.setInterval(loadEvaluations, 2500)
+  pollTimer = window.setInterval(() => {
+    if (!document.hidden) loadEvaluations()
+  }, 2500)
 })
 
 onUnmounted(() => {
@@ -393,15 +364,15 @@ onUnmounted(() => {
 
 .page__header p {
   margin: 6px 0 0;
-  color: #64748b;
+  color: var(--text-4);
   font-size: 13px;
 }
 
 .page__content {
   padding: 16px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
 }
 
 .toolbar {

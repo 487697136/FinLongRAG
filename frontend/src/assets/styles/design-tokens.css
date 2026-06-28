@@ -67,6 +67,10 @@
   --shadow-card: 0 10px 32px rgba(15, 23, 42, 0.06);
   --shadow-soft: 0 4px 14px rgba(15, 23, 42, 0.04);
   --shadow-subtle: 0 2px 8px rgba(15, 23, 42, 0.04);
+  --shadow-login-card: 0 32px 96px rgba(15, 23, 42, 0.32);
+  --shadow-glow: 0 0 40px rgba(59, 130, 246, 0.15);
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.55);
 
   --radius-xs: 6px;
   --radius-sm: 8px;
@@ -173,4 +177,7 @@
   --border-strong: #31445f;
   --shadow-card: 0 16px 40px rgba(0, 0, 0, 0.28);
   --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.2);
-}
+  --shadow-login-card: 0 32px 96px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 0 40px rgba(59, 130, 246, 0.25);
+  --glass-bg: rgba(17, 28, 47, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.08);

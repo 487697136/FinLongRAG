@@ -35,12 +35,12 @@
             <n-descriptions :column="3" bordered size="small">
               <n-descriptions-item label="知识库">{{ report.kb_name || '-' }}</n-descriptions-item>
               <n-descriptions-item label="测试集">{{ report.test_set_name || '-' }}</n-descriptions-item>
-              <n-descriptions-item label="检索策略">{{ strategyLabel(report.strategy) }}</n-descriptions-item>
+              <n-descriptions-item label="检索策略">{{ evalStrategyLabel(report.strategy) }}</n-descriptions-item>
               <n-descriptions-item label="Top-K">{{ report.top_k }}</n-descriptions-item>
               <n-descriptions-item label="状态">
-                <n-tag :type="statusType(report.status)">{{ statusLabel(report.status) }}</n-tag>
+                <n-tag :type="evalStatusType(report.status)">{{ evalStatusLabel(report.status) }}</n-tag>
               </n-descriptions-item>
-              <n-descriptions-item label="创建时间">{{ formatDate(report.created_at) }}</n-descriptions-item>
+              <n-descriptions-item label="创建时间">{{ evalFormatDate(report.created_at) }}</n-descriptions-item>
             </n-descriptions>
 
             <n-progress
@@ -57,11 +57,11 @@
           <n-card class="section" size="small" title="指标概览">
             <div class="metrics">
               <div class="metric">
-                <div class="metric__value">{{ formatPercent(report.metrics?.recall) }}</div>
+                <div class="metric__value">{{ evalFormatPercent(report.metrics?.recall) }}</div>
                 <div class="metric__label">Recall@{{ report.top_k }}</div>
               </div>
               <div class="metric">
-                <div class="metric__value">{{ formatNumber(report.metrics?.mrr) }}</div>
+                <div class="metric__value">{{ evalFormatNumber(report.metrics?.mrr) }}</div>
                 <div class="metric__label">MRR</div>
               </div>
               <div class="metric">
@@ -72,8 +72,8 @@
 
             <n-alert v-if="compareReport" type="info" :bordered="false" style="margin-top: 16px">
               对比报告：{{ compareReport.kb_name }} / {{ compareReport.test_set_name }}，
-              Recall {{ formatPercent(compareReport.metrics?.recall) }}，
-              MRR {{ formatNumber(compareReport.metrics?.mrr) }}。
+              Recall {{ evalFormatPercent(compareReport.metrics?.recall) }}，
+              MRR {{ evalFormatNumber(compareReport.metrics?.mrr) }}。
             </n-alert>
           </n-card>
 
@@ -143,6 +143,7 @@ import {
 } from 'naive-ui'
 import { ArrowBackOutline, DownloadOutline } from '@vicons/ionicons5'
 import { compareEvaluations, getEvaluation, getEvaluations } from '@/api/zhiyuan'
+import { evalFormatDate, evalFormatNumber, evalFormatPercent, evalStatusLabel, evalStatusType, evalStrategyLabel } from '@/utils/formatters'
 
 const route = useRoute()
 const router = useRouter()
@@ -168,7 +169,7 @@ const compareOptions = computed(() =>
   allEvaluations.value
     .filter((item) => item.id !== route.params.id && item.status === 'done')
     .map((item) => ({
-      label: `${item.kb_name || '知识库'} / ${strategyLabel(item.strategy)} / ${formatPercent(item.metrics?.recall)}`,
+      label: `${item.kb_name || '知识库'} / ${evalStrategyLabel(item.strategy)} / ${evalFormatPercent(item.metrics?.recall)}`,
       value: item.id
     }))
 )
@@ -208,7 +209,7 @@ const columns = [
       h(NTag, { type: row.hit ? 'success' : 'error', size: 'small' }, { default: () => (row.hit ? '命中' : '未命中') })
   },
   { title: '排名', key: 'rank', width: 70, render: (row) => row.rank || '-' },
-  { title: '分数', key: 'score', width: 90, render: (row) => formatNumber(row.score) },
+  { title: '分数', key: 'score', width: 90, render: (row) => evalFormatNumber(row.score) },
   {
     title: '匹配片段',
     key: 'matched_chunk',
@@ -271,41 +272,10 @@ function csvCell(value) {
   return `"${String(value).replaceAll('"', '""')}"`
 }
 
-function statusType(status) {
-  if (status === 'done') return 'success'
-  if (status === 'failed') return 'error'
-  if (status === 'running') return 'info'
-  return 'default'
-}
-
-function statusLabel(status) {
-  const map = { running: '运行中', done: '已完成', failed: '失败' }
-  return map[status] || status || '-'
-}
-
-function strategyLabel(strategy) {
-  const map = { hybrid: '混合检索', bm25: 'BM25F', vector: '向量检索' }
-  return map[strategy] || strategy || '-'
-}
-
-function formatPercent(value) {
-  if (typeof value !== 'number') return '-'
-  return `${(value * 100).toFixed(1)}%`
-}
-
-function formatNumber(value) {
-  if (typeof value !== 'number') return '-'
-  return value.toFixed(4)
-}
-
-function formatDate(value) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString('zh-CN')
-}
-
 onMounted(async () => {
   await loadReport()
   pollTimer = window.setInterval(() => {
+    if (document.hidden) return
     if (report.value?.status === 'running') loadReport()
   }, 2500)
 })
@@ -345,7 +315,7 @@ onUnmounted(() => {
 
 .page__header p {
   margin: 4px 0 0;
-  color: #64748b;
+  color: var(--text-4);
   font-size: 13px;
 }
 
@@ -365,27 +335,27 @@ onUnmounted(() => {
 
 .metric {
   padding: 16px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
 }
 
 .metric__value {
   font-size: 26px;
   font-weight: 700;
-  color: #1d4ed8;
+  color: var(--brand-600);
 }
 
 .metric__label {
   margin-top: 4px;
-  color: #64748b;
+  color: var(--text-4);
   font-size: 13px;
 }
 
 .chunk {
   max-height: 88px;
   overflow: auto;
-  color: #475569;
+  color: var(--text-3);
   line-height: 1.5;
   white-space: pre-wrap;
 }

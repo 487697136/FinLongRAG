@@ -2,12 +2,17 @@ import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { hardRedirectToLogin } from '@/api/redirect'
 
+/**
+ * 前端检索模式配置：只包含后端真实支持的能力。
+ * - 模型直答: 纯 LLM 回答，不检索知识库
+ * - 文档检索: 向量 + BM25 混合检索知识库文档
+ * - 混合检索: 智能路由，自动选择最优检索策略
+ * - 数值/对比分析: 面向金融数据的数值提取与对比分析
+ */
 export const queryModeOptions = [
   { label: '文档检索', value: 'naive' },
-  { label: '图谱局部检索', value: 'local' },
-  { label: '图谱全局分析', value: 'global' },
-  { label: '图谱混合检索', value: 'global_local' },
-  { label: '关键词检索', value: 'bm25' }
+  { label: '模型直答', value: 'llm_only' },
+  { label: '混合检索', value: 'auto' }
 ]
 
 export async function listKnowledgeBases(params = {}) {

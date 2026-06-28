@@ -43,8 +43,8 @@ const router = createRouter({
         {
           path: 'graph',
           name: 'Graph',
-          component: () => import('@/views/graph/GraphPage.vue'),
-          meta: { title: '知识图谱' }
+          redirect: '/chat',
+          meta: { title: '金融分析' }
         },
         {
           path: 'test-sets',

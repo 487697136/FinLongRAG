@@ -50,7 +50,7 @@
               <td>{{ item.file_name || '-' }}</td>
               <td>{{ item.sheet_names?.length ? item.sheet_names.join(', ') : '-' }}</td>
               <td>{{ item.count }}</td>
-              <td>{{ formatDate(item.created_at) }}</td>
+              <td>{{ evalFormatDate(item.created_at) }}</td>
               <td>
                 <n-popconfirm
                   positive-text="删除"
@@ -88,6 +88,7 @@ import {
 } from 'naive-ui'
 import { AddOutline } from '@vicons/ionicons5'
 import { deleteTestSet, getTestSets, uploadTestSet } from '@/api/zhiyuan'
+import { evalFormatDate } from '@/utils/formatters'
 
 const message = useMessage()
 const loading = ref(false)
@@ -133,11 +134,6 @@ async function handleDelete(id) {
   }
 }
 
-function formatDate(value) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString('zh-CN')
-}
-
 onMounted(loadTestSets)
 </script>
 
@@ -165,14 +161,14 @@ onMounted(loadTestSets)
 
 .page__header p {
   margin: 6px 0 0;
-  color: #64748b;
+  color: var(--text-4);
   font-size: 13px;
 }
 
 .page__content {
   padding: 16px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
 }
 </style>

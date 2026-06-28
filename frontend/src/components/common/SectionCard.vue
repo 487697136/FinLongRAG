@@ -88,12 +88,12 @@ const hasHeader = computed(() => Boolean(props.title || props.description || slo
 }
 
 .section-card--highlight {
-  border-color: #cddcf3;
-  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-card);
 }
 
 .section-card--muted {
-  background: linear-gradient(180deg, #fbfcff 0%, #f7faff 100%);
+  background: var(--surface-muted);
 }
 
 .section-card :deep(.n-card-header),

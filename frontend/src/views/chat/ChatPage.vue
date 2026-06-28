@@ -12,7 +12,7 @@
           class="chat-home__alert"
           title="暂无知识库"
         >
-          您可以直接使用<strong>「仅模型回答」</strong>模式进行对话；如需知识库增强，请前往<strong>知识库中心</strong>创建并上传文档。
+          您可以使用<strong>「模型直答」</strong>模式直接进行对话；如需检索金融文档，请前往<strong>知识库中心</strong>创建并上传文档。
         </n-alert>
         <n-alert
           v-else-if="selectedKnowledgeBaseStats && !selectedKnowledgeBaseStats.initialized && selectedAskMode !== 'llm_only'"
@@ -20,23 +20,19 @@
           class="chat-home__alert"
           title="当前知识库尚未初始化"
         >
-          请先上传文档并完成处理，或将模式切换为<strong>「仅模型回答」</strong>直接开始对话。
+          请先上传文档并完成处理，或将模式切换为<strong>「模型直答」</strong>直接开始对话。
         </n-alert>
 
         <!-- 欢迎 Hero -->
         <div class="chat-home__hero">
           <div class="chat-home__hero-logo">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="6" r="2" fill="white"/>
-              <circle cx="5" cy="17" r="2" fill="white" opacity="0.75"/>
-              <circle cx="19" cy="17" r="2" fill="white" opacity="0.75"/>
-              <line x1="12" y1="8" x2="5.8" y2="15.2" stroke="white" stroke-width="1.5" opacity="0.6"/>
-              <line x1="12" y1="8" x2="18.2" y2="15.2" stroke="white" stroke-width="1.5" opacity="0.6"/>
-              <line x1="6.5" y1="17" x2="17.5" y2="17" stroke="white" stroke-width="1.5" opacity="0.4"/>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+              <path d="M3 3h7v7H3V3zm11 0h7v7h-7V3zM3 14h7v7H3v-7zm11 0h7v7h-7v-7z" fill="white" opacity="0.9"/>
+              <path d="M12 8l-4 4h2v6h4v-6h2l-4-4z" fill="white" opacity="0.7"/>
             </svg>
           </div>
-          <h1 class="chat-home__hero-title">你好，我是<em>知源</em></h1>
-          <p class="chat-home__hero-desc">基于知识图谱与多源融合检索，精准解答您的问题</p>
+          <h1 class="chat-home__hero-title"><em>FinLongRAG</em> 金融智能问答</h1>
+          <p class="chat-home__hero-desc">面向金融长文本的智能检索与生成问答系统</p>
         </div>
 
         <!-- 主输入区 -->
@@ -45,46 +41,22 @@
             <n-input
               v-model:value="draftQuestion"
               type="textarea"
-              placeholder="向知源提问任何问题...（Enter 发送，Shift+Enter 换行）"
+              placeholder="输入金融文档相关问题...（Enter 发送，Shift+Enter 换行）"
               :autosize="{ minRows: 3, maxRows: 8 }"
               class="chat-home__textarea"
               @keydown="handleComposerKeydown"
             />
             <div class="chat-home__composer-bar">
               <div class="chat-home__composer-selectors">
-                <!-- 知识库选择器：根据 Auto 开关切换单选/多选 -->
+                <!-- 知识库选择 -->
                 <n-select
-                  v-if="!useAutoMode"
                   v-model:value="selectedKnowledgeBaseId"
                   :options="knowledgeBaseOptions"
-                  style="width: 190px; flex-shrink: 0"
-                  placeholder="选择知识库"
-                  size="small"
-                />
-                <n-select
-                  v-else
-                  v-model:value="selectedKnowledgeBaseIds"
-                  :options="knowledgeBaseOptions"
                   style="width: 220px; flex-shrink: 0"
-                  placeholder="选择知识库（可多选）"
+                  placeholder="选择知识库（选填，模型直答可留空）"
                   size="small"
-                  multiple
-                  max-tag-count="responsive"
+                  clearable
                 />
-
-                <!-- Auto 滑块式开关：多知识库融合模式 -->
-                <div
-                  class="mode-auto-switch"
-                  :class="{ 'mode-auto-switch--on': useAutoMode }"
-                  role="group"
-                  aria-label="多知识库融合"
-                >
-                  <div class="mode-auto-switch__text">
-                    <div class="mode-auto-switch__title">融合</div>
-                    <div class="mode-auto-switch__desc">{{ useAutoMode ? '多库融合' : '单库隔离' }}</div>
-                  </div>
-                  <n-switch v-model:value="useAutoMode" size="small" />
-                </div>
 
                 <n-select
                   v-if="configuredLlmProviders.length > 1"
@@ -206,17 +178,13 @@
               <n-spin :show="statsLoading" :size="16">
                 <div v-if="selectedKnowledgeBaseStats" class="kb-stats-grid">
                 <div class="kb-stat-item">
-                  <span class="kb-stat-item__label">初始化</span>
+                  <span class="kb-stat-item__label">状态</span>
                   <strong
                     class="kb-stat-item__value"
                     :class="selectedKnowledgeBaseStats.initialized ? 'text-success' : 'text-warning'"
                   >
                     {{ selectedKnowledgeBaseStats.initialized ? '已就绪' : '未初始化' }}
                   </strong>
-                </div>
-                <div class="kb-stat-item">
-                  <span class="kb-stat-item__label">图谱来源</span>
-                  <strong class="kb-stat-item__value">{{ graphSourceLabel }}</strong>
                 </div>
                 <div class="kb-stat-item">
                   <span class="kb-stat-item__label">文档</span>
@@ -227,12 +195,8 @@
                   <strong class="kb-stat-item__value">{{ selectedKnowledgeBaseStats.total_chunks || 0 }}</strong>
                 </div>
                 <div class="kb-stat-item">
-                  <span class="kb-stat-item__label">实体</span>
-                  <strong class="kb-stat-item__value">{{ selectedKnowledgeBaseStats.entity_count || 0 }}</strong>
-                </div>
-                <div class="kb-stat-item">
-                  <span class="kb-stat-item__label">关系</span>
-                  <strong class="kb-stat-item__value">{{ selectedKnowledgeBaseStats.relation_count || 0 }}</strong>
+                  <span class="kb-stat-item__label">检索模式</span>
+                  <strong class="kb-stat-item__value">{{ currentModeLabel }}</strong>
                 </div>
               </div>
               <p v-else class="panel-empty">请在左侧选择一个知识库</p>
@@ -380,7 +344,7 @@
             :get-source-title="getSourceTitle"
           >
             <template #ai-avatar>
-              <img class="msg-ai-avatar-img" src="/logo.png" alt="知源" />
+              <img class="msg-ai-avatar-img" src="/logo.png" alt="FinLongRAG" />
             </template>
             <template #source-icon>
               <n-icon :component="DocumentTextOutline" size="12" />
@@ -422,20 +386,6 @@
             @keydown="handleComposerKeydown"
           />
           <div class="session-composer__bar">
-            <!-- Auto 滑块式开关（紧凑版） -->
-            <div
-              class="mode-auto-switch mode-auto-switch--sm"
-              :class="{ 'mode-auto-switch--on': useAutoMode }"
-              role="group"
-              aria-label="多知识库融合"
-            >
-              <div class="mode-auto-switch__text">
-                <div class="mode-auto-switch__title">融合</div>
-                <div class="mode-auto-switch__desc">{{ useAutoMode ? '多库' : '单库' }}</div>
-              </div>
-              <n-switch v-model:value="useAutoMode" size="small" />
-            </div>
-
             <n-select
               v-if="configuredLlmProviders.length > 1"
               v-model:value="selectedLlmProvider"
@@ -506,7 +456,6 @@ import {
   NInput,
   NModal,
   NSelect,
-  NSwitch,
   NSpin,
   useMessage
 } from 'naive-ui'
@@ -559,16 +508,16 @@ const looksLikeRefusalOrEmpty = (answerText) => {
 
 const getModeLabel = (mode) => {
   const map = {
-    local: '图谱局部检索',
-    global: '图谱全局分析',
     naive: '文档检索',
-    bm25: '关键词检索',
     llm_only: '模型直答',
-    auto: 'Auto（智能路由）',
-    global_local: '图谱混合检索'
+    auto: '混合检索',
   }
-  return map[mode] || mode || 'Auto'
+  return map[mode] || mode || '混合检索'
 }
+
+const currentModeLabel = computed(() => {
+  return getModeLabel(effectiveSendMode.value)
+})
 
 const route = useRoute()
 const router = useRouter()
@@ -582,7 +531,7 @@ const sessionSearchKeyword = ref('')
 const sidebarCollapsed = ref(false)
 const selectedKnowledgeBaseId = ref('')
 const selectedKnowledgeBaseIds = ref([])  // 多选知识库 IDs
-const selectedAskMode = ref('naive')
+const selectedAskMode = ref('auto')
 const selectedKnowledgeBaseStats = ref(null)
 const activeConversation = ref(null)
 const draftQuestion = ref('')
@@ -592,7 +541,7 @@ const conversationScrollerRef = ref(null)
 const activeStreamController = ref(null)
 const activeStreamTurnId = ref(null)
 const { shouldAutoScroll, handleConversationScroll, scrollConversationToBottom } = useChatAutoScroll(conversationScrollerRef)
-const useAutoMode = ref(false)  // 默认关闭，单库隔离模式
+const useAutoMode = ref(false)  // 保留以兼容但不展示 UI
 const mobileSidebarOpen = ref(false)
 const selectedLlmProvider = ref('')
 const selectedLlmModel = ref('')
@@ -648,21 +597,13 @@ const selectedKnowledgeBase = computed(() => {
   return kbStore.list.find((kbItem) => String(kbItem.id) === String(selectedKnowledgeBaseId.value)) || null
 })
 
-// Manual RAG modes available based on KB capabilities, plus llm_only as the last option.
+// Available query modes based on KB capabilities and backend support
 const effectiveQueryModeOptions = computed(() => {
-  const kb = selectedKnowledgeBase.value
-  const enabledLocal = Boolean(kb?.enable_local)
-  const enabledNaive = kb ? Boolean(kb.enable_naive_rag) : true
-  const enabledBm25 = Boolean(kb?.enable_bm25)
-
-  const modes = queryModeOptions.filter((opt) => {
-    if (opt.value === 'naive') return enabledNaive
-    if (opt.value === 'bm25') return enabledBm25
-    if (opt.value === 'local' || opt.value === 'global' || opt.value === 'global_local') return enabledLocal
-    return true
-  })
-  modes.push({ label: '模型直答', value: 'llm_only' })
-  return modes
+  return [
+    { label: '文档检索', value: 'naive' },
+    { label: '模型直答', value: 'llm_only' },
+    { label: '混合检索', value: 'auto' },
+  ]
 })
 
 // The actual mode to send to backend: auto when toggle is on, else the selected manual mode.
@@ -678,14 +619,7 @@ const filteredSessions = computed(() => {
 })
 
 const conversationTurns = computed(() => activeConversation.value?.turns || [])
-const graphSourceLabel = computed(() => {
-  const source = selectedKnowledgeBaseStats.value?.graph_source
-  if (source === 'neo4j') return 'Neo4j 实时图谱'
-  if (source === 'graphml') return '本地缓存图谱'
-  if (source === 'memory') return '内存图谱'
-  if (source === 'none') return '暂无图谱数据'
-  return '--'
-})
+const graphSourceLabel = computed(() => '--')  // 图谱功能尚未上线
 
 const activeModelLabel = computed(() => {
   // 会话级身份感：展示当前请求实际使用的 best model（来自后端 metadata.configured_models）
@@ -864,19 +798,6 @@ const handleStartFreshChat = async () => {
 
 const ensureReadyForQuery = () => {
   if (effectiveSendMode.value === 'llm_only') return true
-
-  // 多库融合模式
-  if (useAutoMode.value) {
-    if (selectedKnowledgeBaseIds.value.length === 0) {
-      message.warning('请先选择至少一个知识库')
-      return false
-    }
-    // 暂时跳过初始化检查（因为需要检查多个 KB）
-    // TODO: 可以优化为检查所有选中的 KB 是否都已初始化
-    return true
-  }
-
-  // 单库隔离模式
   if (!selectedKnowledgeBaseId.value) {
     message.warning('请先选择知识库')
     return false
@@ -935,26 +856,17 @@ const handleSendQuestion = async () => {
     shouldAutoScroll.value = true
     await scrollConversationToBottom('smooth', true)
 
-    // 构建请求参数：多库模式传递 kb_ids 数组，单库模式传递 kb_id
+    // 构建请求参数
     const requestPayload = {
       question: questionText,
       session_id: activeConversation.value?.session?.id || undefined,
       mode: effectiveSendMode.value,
-      top_k: useAutoMode.value ? 40 : 20,  // 多库模式增加 top_k
+      top_k: 20,
       use_memory: true,
       memory_turn_window: 4,
       llm_provider: selectedLlmProvider.value || undefined,
-      llm_model: selectedLlmModel.value || undefined
-    }
-
-    if (useAutoMode.value) {
-      // 多库融合模式：传递 kb_ids 数组
-      requestPayload.kb_ids = selectedKnowledgeBaseIds.value.length > 0
-        ? selectedKnowledgeBaseIds.value
-        : undefined
-    } else {
-      // 单库隔离模式：传递单个 kb_id
-      requestPayload.knowledge_base_id = selectedKnowledgeBaseId.value
+      llm_model: selectedLlmModel.value || undefined,
+      knowledge_base_id: selectedKnowledgeBaseId.value || undefined
     }
 
     const finalPayload = await executeQueryStream(
@@ -1004,7 +916,7 @@ const handleSendQuestion = async () => {
           "",
           "可能原因：",
           "- 当前知识库未命中相关内容",
-          "- 检索模式不合适（可尝试切换为「仅模型回答」或「朴素检索」）",
+          "- 检索模式不合适（可尝试切换为「模型直答」或「文档检索」）",
           "- 模型拒答或临时异常",
           "",
           "你可以：点击下方「重试」或换个问法再试一次。"
@@ -1074,19 +986,12 @@ const getSourceTitle = (sourceItem, index) => {
       vector: 'vector',
       bm25: 'bm25',
       keyword: 'bm25',
-      local: 'local',
-      global: 'global',
-      global_local: 'global_local',
-      graph_local: 'local',
-      graph_global: 'global',
-      graph_hybrid: 'global_local',
-      llm_only: 'llm_only'
+      llm_only: 'llm_only',
+      auto: 'auto'
     }
     return map[v] || v
   }
 
-  // fused evidence may carry `sources` array (which retriever modes contributed),
-  // while `source` is only the "primary" source of the fused chunk.
   if (Array.isArray(sourceItem?.sources) && sourceItem.sources.length) {
     const unique = [...new Set(sourceItem.sources.map(normalize).filter(Boolean))]
     if (unique.length) return unique.join('+')

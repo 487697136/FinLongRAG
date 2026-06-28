@@ -14,7 +14,7 @@
         </div>
         <div class="msg-ai-content">
           <div class="msg-ai-header">
-            <span class="msg-ai-sender">知源</span>
+            <span class="msg-ai-sender">FinLongRAG</span>
             <span v-if="turn.created_at && !turn.streaming" class="msg-ai-time">
               {{ formatTime(turn.created_at) }}
             </span>
@@ -175,13 +175,8 @@ const getSourceTooltip = (src) => {
       vector: 'vector',
       bm25: 'bm25',
       keyword: 'bm25',
-      local: 'local',
-      global: 'global',
-      global_local: 'global_local',
-      graph_local: 'local',
-      graph_global: 'global',
-      graph_hybrid: 'global_local',
-      llm_only: 'llm_only'
+      llm_only: 'llm_only',
+      auto: 'auto'
     }
     return map[v] || v
   }

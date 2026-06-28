@@ -9,7 +9,7 @@
             <n-icon :component="MenuOutline" />
           </template>
         </n-button>
-        <div class="app-layout__mobile-title">{{ route.meta.title || '知源' }}</div>
+        <div class="app-layout__mobile-title">{{ route.meta.title || 'FinLongRAG' }}</div>
         <div class="app-layout__mobile-space" />
       </header>
 
@@ -48,17 +48,17 @@ const showMobileSidebar = ref(false)
 /* 页面切换过渡动画 */
 .page-fade-enter-active,
 .page-fade-leave-active {
-  transition: opacity 0.22s ease, transform 0.22s ease;
+  transition: opacity 0.26s cubic-bezier(0.16, 1, 0.3, 1), transform 0.26s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .page-fade-enter-from {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(8px) scale(0.99);
 }
 
 .page-fade-leave-to {
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateY(-6px) scale(0.99);
 }
 
 .app-layout {
@@ -85,7 +85,7 @@ const showMobileSidebar = ref(false)
   min-height: 100vh;
   width: min(100%, var(--layout-content-max));
   margin: 0 auto;
-  padding: 24px 28px 28px;
+  padding: 28px 32px 32px;
 }
 
 .app-layout__content--full {
@@ -123,7 +123,7 @@ const showMobileSidebar = ref(false)
 
   .app-layout__content {
     width: 100%;
-    padding: 12px 16px 24px;
+    padding: 16px 18px 28px;
   }
 }
 </style>

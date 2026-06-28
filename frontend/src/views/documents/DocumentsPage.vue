@@ -235,10 +235,16 @@ function ensurePolling() {
     ['processing', 'pending'].includes(item.status)
   )
   if (!hasProcessing) return
-  // 每 2 秒快速轮询进度（轻量端点）
-  progressPollTimer = window.setInterval(pollProcessingProgress, 2000)
-  // 每 10 秒做一次全量刷新，确保数据最终一致
-  pollTimer = window.setInterval(() => { loadDocuments() }, 10000)
+  // 每 2 秒快速轮询进度（轻量端点），页面隐藏时暂停
+  progressPollTimer = window.setInterval(() => {
+    if (document.hidden) return
+    pollProcessingProgress()
+  }, 2000)
+  // 每 10 秒做一次全量刷新，页面隐藏时暂停
+  pollTimer = window.setInterval(() => {
+    if (document.hidden) return
+    loadDocuments()
+  }, 10000)
 }
 
 function handleUploadDocument() {
@@ -377,13 +383,13 @@ onBeforeUnmount(() => {
   gap: 10px;
   margin-top: 12px;
   padding: 12px 14px;
-  background: rgba(245, 158, 11, 0.08);
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: var(--status-warning-bg);
+  border: 1px solid var(--warning-color);
   border-radius: 10px;
 }
 .delete-warn-box__icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
-.delete-warn-box__title { font-size: 13px; font-weight: 700; color: #92400e; margin-bottom: 4px; }
-.delete-warn-box__desc { font-size: 12px; color: #78350f; line-height: 1.6; }
+.delete-warn-box__title { font-size: 13px; font-weight: 700; color: var(--status-warning-text); margin-bottom: 4px; }
+.delete-warn-box__desc { font-size: 12px; color: var(--status-warning-text); line-height: 1.6; }
 
 .progress-cell { display: flex; flex-direction: column; gap: 2px; min-width: 160px; }
 .progress-cell__header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
