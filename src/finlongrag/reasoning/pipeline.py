@@ -66,7 +66,7 @@ class ReasoningPipeline:
         verdicts = []
         memory = WorkingMemory(question.qid, question.question)
         for claim in self.analyzer.build_claims(question):
-            verdict, usage = self.verifier.verify(claim)
+            verdict, usage = self.verifier.verify(claim, metadata=question.metadata)
             total_usage.add(usage)
             verdicts.append(verdict)
             memory.add_verdict(verdict)
@@ -107,6 +107,7 @@ class ReasoningPipeline:
             rewrite.sub_queries,
             filter_doc_ids=filter_doc_ids,
             source="open_query_rewrite",
+            metadata=question.metadata,
         )
         reranked, rerank_report = self.evidence_reranker.rerank(
             question,

@@ -123,13 +123,14 @@ class KnowledgeRepository(Protocol):
         name: str,
         description: str = "",
         metadata: dict[str, Any] | None = None,
+        created_by: str | None = None,
     ) -> KnowledgeBaseRecord:
         ...
 
-    def list_knowledge_bases(self, *, limit: int = 100) -> list[KnowledgeBaseRecord]:
+    def list_knowledge_bases(self, *, limit: int = 100, user_id: str | None = None) -> list[KnowledgeBaseRecord]:
         ...
 
-    def get_knowledge_base(self, kb_id: str) -> KnowledgeBaseRecord | None:
+    def get_knowledge_base(self, kb_id: str, user_id: str | None = None) -> KnowledgeBaseRecord | None:
         ...
 
     def register_document(
@@ -182,7 +183,7 @@ class KnowledgeRepository(Protocol):
     def get_index_version(self, index_version_id: str) -> IndexVersionRecord | None:
         ...
 
-    def get_active_index_version(self) -> IndexVersionRecord | None:
+    def get_active_index_version(self, kb_id: str | None = None) -> IndexVersionRecord | None:
         ...
 
     def list_index_versions(self, kb_id: str | None = None, *, limit: int = 100) -> list[IndexVersionRecord]:

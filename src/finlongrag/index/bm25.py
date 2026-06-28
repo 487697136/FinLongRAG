@@ -81,6 +81,8 @@ class BM25FIndex:
         filter_doc_ids: set[str] | None = None,
         source: str = "bm25f",
         scoring_mode: str = "bm25f",
+        kb_id: str | None = None,
+        kb_ids: list[str] | None = None,
     ) -> list[RetrievalResult]:
         query_tokens = tokenize(query, mode=self.tokenizer_mode)
         if not query_tokens:
@@ -88,12 +90,25 @@ class BM25FIndex:
         scores = self._bm25f_scores(query_tokens) if scoring_mode == "bm25f" else self._base_scores(query_tokens)
         ranked = sorted(scores.items(), key=lambda row: row[1], reverse=True)
         output: list[RetrievalResult] = []
+
+        # 准备 KB 过滤集合
+        kb_filter_set = None
+        if kb_ids:
+            kb_filter_set = set(kb_ids)
+        elif kb_id:
+            kb_filter_set = {kb_id}
+
         for idx, score in ranked:
             if score <= 0:
                 continue
             chunk = self.chunks[idx]
             if filter_doc_ids and chunk.doc_id not in filter_doc_ids:
                 continue
+            # Filter by kb_id (single) or kb_ids (multiple)
+            if kb_filter_set:
+                chunk_kb_id = chunk.metadata.get("kb_id")
+                if chunk_kb_id not in kb_filter_set:
+                    continue
             output.append(self.result_from_chunk(chunk, float(score), source, query))
             if len(output) >= top_k:
                 break
@@ -118,6 +133,7 @@ class BM25FIndex:
                 "chunk_type": chunk.metadata.get("chunk_type", "atomic_text"),
                 "extra_index_fields": chunk.metadata.get("extra_index_fields", []),
                 "path": chunk.metadata.get("path", ""),
+                "kb_id": chunk.metadata.get("kb_id"),  # Add kb_id to result metadata
             },
         )
 

@@ -39,11 +39,11 @@ class ChatService:
         self.repository = repository
         self.memory = memory or ConversationMemory()
 
-    def create_conversation(self, *, title: str = "新对话", metadata: dict[str, Any] | None = None) -> ConversationRecord:
-        return self.repository.create_conversation(title=title, metadata=metadata)
+    def create_conversation(self, *, title: str = "新对话", metadata: dict[str, Any] | None = None, user_id: str | None = None) -> ConversationRecord:
+        return self.repository.create_conversation(title=title, metadata=metadata, user_id=user_id)
 
-    def list_conversations(self, *, limit: int = 50) -> list[ConversationRecord]:
-        return self.repository.list_conversations(limit=limit)
+    def list_conversations(self, *, limit: int = 50, user_id: str | None = None) -> list[ConversationRecord]:
+        return self.repository.list_conversations(limit=limit, user_id=user_id)
 
     def list_messages(self, conversation_id: str, *, limit: int = 100) -> list[MessageRecord]:
         return self.repository.list_messages(conversation_id, limit=limit)
@@ -55,6 +55,8 @@ class ChatService:
         conversation_id: str | None = None,
         domain: str = "",
         doc_ids: list[str] | None = None,
+        kb_id: str | None = None,
+        kb_ids: list[str] | None = None,
     ) -> ChatResponse:
         conversation = self._ensure_conversation(conversation_id, message)
         previous_messages = self.repository.list_messages(conversation.conversation_id, limit=80)
@@ -63,12 +65,19 @@ class ChatService:
             conversation.conversation_id,
             "user",
             message,
-            metadata={"domain": domain, "doc_ids": doc_ids or []},
+            metadata={
+                "domain": domain,
+                "doc_ids": doc_ids or [],
+                "knowledge_base_id": kb_id or "",
+                "kb_ids": kb_ids or []
+            },
         )
         result = self.pipeline.ask(
             message,
             domain=domain,
             doc_ids=doc_ids or [],
+            kb_id=kb_id,
+            kb_ids=kb_ids,
             qid=f"chat_{conversation.conversation_id}_{user_message.message_id[:8]}",
             history=history,
         )

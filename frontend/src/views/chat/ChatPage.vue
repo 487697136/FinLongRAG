@@ -52,37 +52,39 @@
             />
             <div class="chat-home__composer-bar">
               <div class="chat-home__composer-selectors">
+                <!-- 知识库选择器：根据 Auto 开关切换单选/多选 -->
                 <n-select
+                  v-if="!useAutoMode"
                   v-model:value="selectedKnowledgeBaseId"
                   :options="knowledgeBaseOptions"
                   style="width: 190px; flex-shrink: 0"
                   placeholder="选择知识库"
                   size="small"
                 />
+                <n-select
+                  v-else
+                  v-model:value="selectedKnowledgeBaseIds"
+                  :options="knowledgeBaseOptions"
+                  style="width: 220px; flex-shrink: 0"
+                  placeholder="选择知识库（可多选）"
+                  size="small"
+                  multiple
+                  max-tag-count="responsive"
+                />
 
-                <!-- Auto 滑块式开关：开启时不出现任何手动内容 -->
+                <!-- Auto 滑块式开关：多知识库融合模式 -->
                 <div
                   class="mode-auto-switch"
                   :class="{ 'mode-auto-switch--on': useAutoMode }"
                   role="group"
-                  aria-label="Auto 智能路由"
+                  aria-label="多知识库融合"
                 >
                   <div class="mode-auto-switch__text">
-                    <div class="mode-auto-switch__title">Auto</div>
-                    <div class="mode-auto-switch__desc">{{ useAutoMode ? '智能路由' : '手动模式' }}</div>
+                    <div class="mode-auto-switch__title">融合</div>
+                    <div class="mode-auto-switch__desc">{{ useAutoMode ? '多库融合' : '单库隔离' }}</div>
                   </div>
                   <n-switch v-model:value="useAutoMode" size="small" />
                 </div>
-
-                <!-- Manual mode selector (visible when Auto is OFF) -->
-                <n-select
-                  v-if="!useAutoMode"
-                  v-model:value="selectedAskMode"
-                  :options="effectiveQueryModeOptions"
-                  style="width: 164px; flex-shrink: 0"
-                  size="small"
-                  placeholder="选择检索方式"
-                />
 
                 <n-select
                   v-if="configuredLlmProviders.length > 1"
@@ -263,7 +265,7 @@
             <button class="chat-session-sidebar__toggle" type="button" @click="sidebarCollapsed = !sidebarCollapsed">
               {{ sidebarCollapsed ? '展开' : '收起' }}
             </button>
-            <button class="chat-session-sidebar__new" type="button" @click="handleStartFreshChat; mobileSidebarOpen = false">
+            <button class="chat-session-sidebar__new" type="button" @click="handleStartFreshChat(); mobileSidebarOpen = false">
               新建
             </button>
           </div>
@@ -425,24 +427,14 @@
               class="mode-auto-switch mode-auto-switch--sm"
               :class="{ 'mode-auto-switch--on': useAutoMode }"
               role="group"
-              aria-label="Auto 智能路由"
+              aria-label="多知识库融合"
             >
               <div class="mode-auto-switch__text">
-                <div class="mode-auto-switch__title">Auto</div>
-                <div class="mode-auto-switch__desc">{{ useAutoMode ? '智能路由' : '手动' }}</div>
+                <div class="mode-auto-switch__title">融合</div>
+                <div class="mode-auto-switch__desc">{{ useAutoMode ? '多库' : '单库' }}</div>
               </div>
               <n-switch v-model:value="useAutoMode" size="small" />
             </div>
-
-            <!-- Manual mode selector (includes 模型直答 as last option) -->
-            <n-select
-              v-if="!useAutoMode"
-              v-model:value="selectedAskMode"
-              :options="effectiveQueryModeOptions"
-              style="width: 156px; flex-shrink: 0"
-              size="small"
-              placeholder="选择检索方式"
-            />
 
             <n-select
               v-if="configuredLlmProviders.length > 1"
@@ -589,6 +581,7 @@ const recentSessions = ref([])
 const sessionSearchKeyword = ref('')
 const sidebarCollapsed = ref(false)
 const selectedKnowledgeBaseId = ref('')
+const selectedKnowledgeBaseIds = ref([])  // 多选知识库 IDs
 const selectedAskMode = ref('naive')
 const selectedKnowledgeBaseStats = ref(null)
 const activeConversation = ref(null)
@@ -599,7 +592,7 @@ const conversationScrollerRef = ref(null)
 const activeStreamController = ref(null)
 const activeStreamTurnId = ref(null)
 const { shouldAutoScroll, handleConversationScroll, scrollConversationToBottom } = useChatAutoScroll(conversationScrollerRef)
-const useAutoMode = ref(true)
+const useAutoMode = ref(false)  // 默认关闭，单库隔离模式
 const mobileSidebarOpen = ref(false)
 const selectedLlmProvider = ref('')
 const selectedLlmModel = ref('')
@@ -871,7 +864,23 @@ const handleStartFreshChat = async () => {
 
 const ensureReadyForQuery = () => {
   if (effectiveSendMode.value === 'llm_only') return true
-  if (!selectedKnowledgeBaseId.value) { message.warning('请先选择知识库'); return false }
+
+  // 多库融合模式
+  if (useAutoMode.value) {
+    if (selectedKnowledgeBaseIds.value.length === 0) {
+      message.warning('请先选择至少一个知识库')
+      return false
+    }
+    // 暂时跳过初始化检查（因为需要检查多个 KB）
+    // TODO: 可以优化为检查所有选中的 KB 是否都已初始化
+    return true
+  }
+
+  // 单库隔离模式
+  if (!selectedKnowledgeBaseId.value) {
+    message.warning('请先选择知识库')
+    return false
+  }
   if (!selectedKnowledgeBaseStats.value?.initialized) {
     message.warning('当前知识库尚未初始化，请先上传文档完成处理，或切换为「模型直答」模式')
     return false
@@ -925,18 +934,31 @@ const handleSendQuestion = async () => {
     draftQuestion.value = ''
     shouldAutoScroll.value = true
     await scrollConversationToBottom('smooth', true)
+
+    // 构建请求参数：多库模式传递 kb_ids 数组，单库模式传递 kb_id
+    const requestPayload = {
+      question: questionText,
+      session_id: activeConversation.value?.session?.id || undefined,
+      mode: effectiveSendMode.value,
+      top_k: useAutoMode.value ? 40 : 20,  // 多库模式增加 top_k
+      use_memory: true,
+      memory_turn_window: 4,
+      llm_provider: selectedLlmProvider.value || undefined,
+      llm_model: selectedLlmModel.value || undefined
+    }
+
+    if (useAutoMode.value) {
+      // 多库融合模式：传递 kb_ids 数组
+      requestPayload.kb_ids = selectedKnowledgeBaseIds.value.length > 0
+        ? selectedKnowledgeBaseIds.value
+        : undefined
+    } else {
+      // 单库隔离模式：传递单个 kb_id
+      requestPayload.knowledge_base_id = selectedKnowledgeBaseId.value
+    }
+
     const finalPayload = await executeQueryStream(
-      {
-        question: questionText,
-        knowledge_base_id: selectedKnowledgeBaseId.value,
-        session_id: activeConversation.value?.session?.id || undefined,
-        mode: effectiveSendMode.value,
-        top_k: 20,
-        use_memory: true,
-        memory_turn_window: 4,
-        llm_provider: selectedLlmProvider.value || undefined,
-        llm_model: selectedLlmModel.value || undefined
-      },
+      requestPayload,
       {
         signal: streamController.signal,
         onMessage: (event) => {
@@ -1075,6 +1097,29 @@ const getSourceTitle = (sourceItem, index) => {
 
 watch(() => route.fullPath, async () => { await initializeFromRoute() }, { immediate: true })
 watch(selectedKnowledgeBaseId, async () => { await loadSelectedKnowledgeBaseStats() })
+
+// 当 Auto 模式切换时，同步单选和多选状态
+watch(useAutoMode, (isMulti) => {
+  if (isMulti) {
+    // 切换到多选模式：将单选的 KB 转为多选数组
+    if (selectedKnowledgeBaseId.value) {
+      selectedKnowledgeBaseIds.value = [selectedKnowledgeBaseId.value]
+    }
+  } else {
+    // 切换到单选模式：取多选数组的第一个作为单选值
+    if (selectedKnowledgeBaseIds.value.length > 0) {
+      selectedKnowledgeBaseId.value = selectedKnowledgeBaseIds.value[0]
+    }
+  }
+})
+
+// 监听多选变化，更新统计信息（显示第一个选中的 KB）
+watch(selectedKnowledgeBaseIds, async (ids) => {
+  if (ids.length > 0) {
+    selectedKnowledgeBaseId.value = ids[0]  // 用于加载统计信息
+  }
+})
+
 watch(
   () => effectiveQueryModeOptions.value.map((o) => o.value).join(','),
   () => {

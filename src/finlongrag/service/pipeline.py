@@ -32,19 +32,20 @@ class FinLongRAGPipeline:
         self.settings = settings or Settings.from_file()
         self.settings.ensure_dirs()
         self.index_version: dict[str, object] | None = None
-        (
-            resolved_index_path,
-            resolved_doc_index_path,
-            active_version,
-        ) = _resolve_index_paths(self.settings, index_path=index_path, doc_index_path=doc_index_path)
-        self.index_path = resolved_index_path
-        self.doc_index_path = resolved_doc_index_path
-        self.index_version = active_version
+
+        # Force use of global merged indexes for multi-KB support
+        if index_path is None:
+            index_path = self.settings.index_dir / "bm25_index_global.pkl"
+        if doc_index_path is None:
+            doc_index_path = self.settings.index_dir / "document_index_global.pkl"
+
+        self.index_path = index_path
+        self.doc_index_path = doc_index_path
+        self.index_version = None  # Global index has no single version
         self.trace_recorder = trace_recorder or TraceRecorder(self.settings.output_dir / "traces.jsonl")
         self.index = _load_bm25_or_empty(self.index_path, tokenizer_mode=self.settings.tokenizer_mode)
         self.doc_index = _load_document_index_or_empty(self.doc_index_path, tokenizer_mode=self.settings.tokenizer_mode)
-        active_kb_id = str(active_version.get("kb_id")) if active_version and active_version.get("kb_id") else None
-        self.vector_store = create_configured_vector_store(self.settings, kb_id=active_kb_id)
+        self.vector_store = create_configured_vector_store(self.settings, kb_id=None)  # Search all KBs
         self.vector_provider = create_embedding_provider(self.settings)
         self.retriever = Retriever(
             self.index,
@@ -89,19 +90,24 @@ class FinLongRAGPipeline:
         *,
         domain: str = "",
         doc_ids: list[str] | None = None,
+        kb_id: str | None = None,
+        kb_ids: list[str] | None = None,
         qid: str = "adhoc",
         history: str = "",
     ) -> AnswerResult:
-        return self.answer(
-            Question(
-                qid=qid,
-                question=text,
-                domain=domain,
-                doc_ids=doc_ids or [],
-                answer_format="open",
-            ),
-            history=history,
+        question = Question(
+            qid=qid,
+            question=text,
+            domain=domain,
+            doc_ids=doc_ids or [],
+            answer_format="open",
         )
+        # 处理多知识库融合或单知识库隔离
+        if kb_ids:
+            question.metadata = {"kb_ids": kb_ids}
+        elif kb_id:
+            question.metadata = {"kb_id": kb_id}
+        return self.answer(question, history=history)
 
 
 def _resolve_index_paths(
@@ -113,13 +119,25 @@ def _resolve_index_paths(
     if index_path is not None:
         return index_path, doc_index_path or settings.index_dir / "document_index.pkl", None
 
+    # Priority 1: Use global merged indexes for multi-KB support
+    global_bm25 = settings.index_dir / "bm25_index_global.pkl"
+    global_doc = settings.index_dir / "document_index_global.pkl"
+
+    if global_bm25.exists() and global_doc.exists():
+        print(f"[INFO] Loading global indexes: {global_bm25}")
+        return global_bm25, global_doc, {"type": "global", "kb_id": None}
+
+    # Priority 2: Try single KB active version (legacy)
     active_version = _load_active_index_version(settings)
     if active_version:
         chunk_path = Path(str(active_version["chunk_index_path"]))
         document_path = Path(str(active_version["document_index_path"]))
         if chunk_path.exists() and document_path.exists():
+            print(f"[INFO] Loading single KB index: {chunk_path}")
             return chunk_path, document_path, active_version
 
+    # Priority 3: Fallback to legacy paths
+    print(f"[INFO] Fallback to legacy index paths")
     return (
         settings.index_dir / "bm25_index.pkl",
         doc_index_path or settings.index_dir / "document_index.pkl",

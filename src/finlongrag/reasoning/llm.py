@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -19,8 +20,18 @@ class LLMResponse:
     raw: dict | None = None
 
 
+@dataclass
+class LLMStreamChunk:
+    """Single chunk from streaming response."""
+    content: str
+    finish_reason: str | None = None
+
+
 class ChatModel(Protocol):
     def chat(self, messages: list[dict[str, str]], *, max_tokens: int | None = None, temperature: float | None = None) -> LLMResponse:
+        ...
+
+    def chat_stream(self, messages: list[dict[str, str]], *, max_tokens: int | None = None, temperature: float | None = None) -> Iterator[LLMStreamChunk]:
         ...
 
 
@@ -81,4 +92,72 @@ class QwenChatModel:
                     break
                 time.sleep(1.5 * (attempt + 1))
         raise RuntimeError(f"Qwen API call failed after retries: {last_error}") from last_error
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> Iterator[LLMStreamChunk]:
+        """Stream chat completions from Qwen API."""
+        if self.dry_run:
+            # Dry-run mode: simulate streaming
+            text = '{"label":"insufficient","answer":"A","confidence":0.0,"reason":"dry-run"}'
+            for char in text:
+                yield LLMStreamChunk(content=char)
+            yield LLMStreamChunk(content="", finish_reason="stop")
+            return
+
+        url = self.settings.qwen_base_url.rstrip("/") + "/chat/completions"
+        payload = {
+            "model": self.settings.qwen_model,
+            "messages": messages,
+            "temperature": self.settings.temperature if temperature is None else temperature,
+            "max_tokens": max_tokens or self.settings.answer_max_tokens,
+            "stream": True,  # Enable streaming
+        }
+
+        try:
+            response = requests.post(
+                url,
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=self.settings.request_timeout_seconds,
+                stream=True,  # Enable streaming response
+            )
+            response.raise_for_status()
+
+            # Parse SSE stream
+            for line in response.iter_lines():
+                if not line:
+                    continue
+
+                line_str = line.decode("utf-8")
+                if not line_str.startswith("data: "):
+                    continue
+
+                data_str = line_str[6:].strip()  # Remove "data: " prefix
+                if data_str == "[DONE]":
+                    break
+
+                try:
+                    import json
+                    data = json.loads(data_str)
+                    choices = data.get("choices", [])
+                    if not choices:
+                        continue
+
+                    delta = choices[0].get("delta", {})
+                    content = delta.get("content", "")
+                    finish_reason = choices[0].get("finish_reason")
+
+                    if content or finish_reason:
+                        yield LLMStreamChunk(content=content, finish_reason=finish_reason)
+
+                except json.JSONDecodeError:
+                    continue
+
+        except Exception as exc:
+            raise RuntimeError(f"Qwen streaming API call failed: {exc}") from exc
 

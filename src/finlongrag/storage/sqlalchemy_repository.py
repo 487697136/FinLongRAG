@@ -23,11 +23,12 @@ class SQLAlchemyConversationRepository:
         self._sessionmaker = get_sync_sessionmaker(database_url)
 
     def create_conversation(
-        self, *, title: str = "新对话", metadata: dict[str, Any] | None = None
+        self, *, title: str = "新对话", metadata: dict[str, Any] | None = None, user_id: str | None = None
     ) -> ConversationRecord:
         now = _now()
         row = Conversation(
             conversation_id=uuid.uuid4().hex,
+            user_id=user_id,  # 设置用户 ID
             title=title.strip() or "新对话",
             summary="",
             metadata_json=metadata or {},
@@ -39,17 +40,24 @@ class SQLAlchemyConversationRepository:
             session.commit()
             return _conversation_from_model(row)
 
-    def list_conversations(self, *, limit: int = 50) -> list[ConversationRecord]:
+    def list_conversations(self, *, limit: int = 50, user_id: str | None = None) -> list[ConversationRecord]:
         with self._sessionmaker() as session:
-            rows = session.scalars(
-                select(Conversation).order_by(Conversation.updated_at.desc()).limit(limit)
-            ).all()
+            stmt = select(Conversation).order_by(Conversation.updated_at.desc()).limit(limit)
+            # 用户隔离：只返回该用户的会话
+            if user_id:
+                stmt = stmt.where(Conversation.user_id == user_id)
+            rows = session.scalars(stmt).all()
             return [_conversation_from_model(row) for row in rows]
 
-    def get_conversation(self, conversation_id: str) -> ConversationRecord | None:
+    def get_conversation(self, conversation_id: str, user_id: str | None = None) -> ConversationRecord | None:
         with self._sessionmaker() as session:
             row = session.get(Conversation, conversation_id)
-            return _conversation_from_model(row) if row else None
+            if row is None:
+                return None
+            # 用户隔离：只允许访问自己的会话
+            if user_id and row.user_id != user_id:
+                return None
+            return _conversation_from_model(row)
 
     def list_messages(self, conversation_id: str, *, limit: int = 100) -> list[MessageRecord]:
         with self._sessionmaker() as session:
