@@ -37,6 +37,7 @@ class SQLAlchemyKnowledgeRepository:
         name: str,
         description: str = "",
         metadata: dict[str, Any] | None = None,
+        created_by: str | None = None,
     ) -> KnowledgeBaseRecord:
         now = _now()
         row = KnowledgeBase(
@@ -45,6 +46,7 @@ class SQLAlchemyKnowledgeRepository:
             description=description.strip(),
             status="active",
             metadata_json=metadata or {},
+            created_by=created_by,  # 设置创建者
             created_at=now,
             updated_at=now,
         )
@@ -53,26 +55,50 @@ class SQLAlchemyKnowledgeRepository:
             session.commit()
             return _kb_from_model(row)
 
-    def list_knowledge_bases(self, *, limit: int = 100) -> list[KnowledgeBaseRecord]:
+    def list_knowledge_bases(self, *, limit: int = 100, user_id: str | None = None) -> list[KnowledgeBaseRecord]:
         with self._sessionmaker() as session:
-            rows = session.scalars(
+            stmt = (
                 select(KnowledgeBase)
                 .where(KnowledgeBase.deleted_at.is_(None))
                 .order_by(KnowledgeBase.updated_at.desc())
                 .limit(limit)
-            ).all()
+            )
+            # 用户隔离：只返回该用户创建的知识库
+            if user_id:
+                stmt = stmt.where(KnowledgeBase.created_by == user_id)
+
+            rows = session.scalars(stmt).all()
             return [_kb_from_model(row) for row in rows]
 
-    def get_knowledge_base(self, kb_id: str) -> KnowledgeBaseRecord | None:
+    def get_knowledge_base(self, kb_id: str, user_id: str | None = None) -> KnowledgeBaseRecord | None:
         with self._sessionmaker() as session:
             row = session.get(KnowledgeBase, kb_id)
-            return _kb_from_model(row) if row and row.deleted_at is None else None
+            if row is None or row.deleted_at is not None:
+                return None
+            # 用户隔离：只允许访问自己创建的知识库
+            if user_id and row.created_by != user_id:
+                return None
+            return _kb_from_model(row)
 
     def delete_knowledge_base(self, kb_id: str) -> bool:
         with self._sessionmaker() as session:
             row = session.get(KnowledgeBase, kb_id)
             if row is None:
                 return False
+
+            # Delete chunks first (foreign key constraint)
+            session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.kb_id == kb_id))
+
+            # Delete documents
+            session.execute(delete(KnowledgeDocument).where(KnowledgeDocument.kb_id == kb_id))
+
+            # Delete ingestion tasks
+            session.execute(delete(IngestionTask).where(IngestionTask.kb_id == kb_id))
+
+            # Delete index versions
+            session.execute(delete(IndexVersion).where(IndexVersion.kb_id == kb_id))
+
+            # Finally delete the knowledge base
             session.delete(row)
             session.commit()
             return True
@@ -152,10 +178,18 @@ class SQLAlchemyKnowledgeRepository:
             if row is None:
                 return None
             record = _document_from_model(row)
+
+            # Delete all chunks belonging to this document
+            session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document_id))
+
+            # Delete the document
             session.delete(row)
+
+            # Update knowledge base timestamp
             kb = session.get(KnowledgeBase, row.kb_id)
             if kb is not None:
                 kb.updated_at = _now()
+
             session.commit()
             return record
 
@@ -332,7 +366,12 @@ class SQLAlchemyKnowledgeRepository:
             row = session.get(IndexVersion, index_version_id)
             if row is None:
                 raise KeyError(f"index version not found: {index_version_id}")
-            session.execute(update(IndexVersion).where(IndexVersion.status == "active").values(status="superseded"))
+            # Only supersede index versions from the same knowledge base
+            session.execute(
+                update(IndexVersion)
+                .where(IndexVersion.status == "active", IndexVersion.kb_id == row.kb_id)
+                .values(status="superseded")
+            )
             row.status = "active"
             row.activated_at = now
             kb = session.get(KnowledgeBase, row.kb_id)
@@ -346,14 +385,13 @@ class SQLAlchemyKnowledgeRepository:
             row = session.get(IndexVersion, index_version_id)
             return _index_version_from_model(row) if row else None
 
-    def get_active_index_version(self) -> IndexVersionRecord | None:
+    def get_active_index_version(self, kb_id: str | None = None) -> IndexVersionRecord | None:
         with self._sessionmaker() as session:
-            row = session.scalar(
-                select(IndexVersion)
-                .where(IndexVersion.status == "active")
-                .order_by(IndexVersion.activated_at.desc())
-                .limit(1)
-            )
+            stmt = select(IndexVersion).where(IndexVersion.status == "active")
+            if kb_id:
+                stmt = stmt.where(IndexVersion.kb_id == kb_id)
+            stmt = stmt.order_by(IndexVersion.activated_at.desc()).limit(1)
+            row = session.scalar(stmt)
             return _index_version_from_model(row) if row else None
 
     def list_index_versions(self, kb_id: str | None = None, *, limit: int = 100) -> list[IndexVersionRecord]:

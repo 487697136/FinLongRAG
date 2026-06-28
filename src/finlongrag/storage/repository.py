@@ -38,13 +38,14 @@ class ConversationRepository(Protocol):
         *,
         title: str = "新对话",
         metadata: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ) -> ConversationRecord:
         ...
 
-    def list_conversations(self, *, limit: int = 50) -> list[ConversationRecord]:
+    def list_conversations(self, *, limit: int = 50, user_id: str | None = None) -> list[ConversationRecord]:
         ...
 
-    def get_conversation(self, conversation_id: str) -> ConversationRecord | None:
+    def get_conversation(self, conversation_id: str, user_id: str | None = None) -> ConversationRecord | None:
         ...
 
     def list_messages(self, conversation_id: str, *, limit: int = 100) -> list[MessageRecord]:

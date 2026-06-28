@@ -21,3 +21,4 @@ frontend/*.local
 .idea/
 .vscode/
 .DS_Store
+.npm-cache/

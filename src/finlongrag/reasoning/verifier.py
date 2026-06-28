@@ -25,12 +25,13 @@ class ClaimVerifier:
         self.evidence_per_claim = evidence_per_claim
         self.evidence_chars_per_claim = evidence_chars_per_claim
 
-    def verify(self, claim: Claim) -> tuple[ClaimVerdict, TokenUsage]:
+    def verify(self, claim: Claim, *, metadata: dict | None = None) -> tuple[ClaimVerdict, TokenUsage]:
         filter_doc_ids = set(claim.doc_scope) if claim.doc_scope else None
         candidates = self.retriever.retrieve_queries(
             build_claim_queries(claim),
             filter_doc_ids=filter_doc_ids,
             source=f"claim:{claim.option_key}",
+            metadata=metadata,
         )
         evidence = select_evidence(
             claim,

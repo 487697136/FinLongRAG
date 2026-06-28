@@ -54,11 +54,11 @@ class KnowledgeService:
             raise ValueError("knowledge base name is required")
         return self.repository.create_knowledge_base(name=name, description=description, metadata=metadata)
 
-    def list_knowledge_bases(self, *, limit: int = 100) -> list[KnowledgeBaseRecord]:
-        return self.repository.list_knowledge_bases(limit=limit)
+    def list_knowledge_bases(self, *, limit: int = 100, user_id: str | None = None) -> list[KnowledgeBaseRecord]:
+        return self.repository.list_knowledge_bases(limit=limit, user_id=user_id)
 
-    def get_knowledge_base(self, kb_id: str) -> KnowledgeBaseRecord:
-        record = self.repository.get_knowledge_base(kb_id)
+    def get_knowledge_base(self, kb_id: str, user_id: str | None = None) -> KnowledgeBaseRecord:
+        record = self.repository.get_knowledge_base(kb_id, user_id=user_id)
         if record is None:
             raise KeyError(f"knowledge base not found: {kb_id}")
         return record
@@ -293,8 +293,8 @@ class KnowledgeService:
             self.get_knowledge_base(kb_id)
         return self.repository.list_index_versions(kb_id, limit=limit)
 
-    def get_active_index_version(self) -> IndexVersionRecord | None:
-        return self.repository.get_active_index_version()
+    def get_active_index_version(self, kb_id: str | None = None) -> IndexVersionRecord | None:
+        return self.repository.get_active_index_version(kb_id=kb_id)
 
     def activate_index_version(self, index_version_id: str) -> IndexVersionRecord:
         version = self.repository.get_index_version(index_version_id)

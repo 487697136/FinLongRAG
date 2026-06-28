@@ -91,7 +91,7 @@ class IngestionTask(Base):
     task_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     kb_id: Mapped[str] = mapped_column(String(64), ForeignKey("knowledge_bases.kb_id"), index=True)
     status: Mapped[str] = mapped_column(String(32), default="running")
-    stage: Mapped[str] = mapped_column(String(32), default="created")
+    stage: Mapped[str] = mapped_column(String(128), default="created")
     total_documents: Mapped[int] = mapped_column(Integer, default=0)
     processed_documents: Mapped[int] = mapped_column(Integer, default=0)
     total_chunks: Mapped[int] = mapped_column(Integer, default=0)

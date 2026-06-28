@@ -47,8 +47,15 @@ class DashScopeEmbeddingProvider:
         return matrix
 
     def _embed_batch_once(self, texts: list[str]) -> list[np.ndarray]:
-        payload: dict[str, Any] = {"model": self.model, "input": texts}
-        url = self.base_url.rstrip("/") + "/embeddings"
+        # DashScope native API format
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "input": {
+                "texts": texts
+            }
+        }
+        # Complete URL: base + /text-embedding/text-embedding
+        url = self.base_url.rstrip("/") + "/text-embedding/text-embedding"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         try:
             response = httpx.post(url, headers=headers, json=payload, timeout=self.timeout_seconds)
@@ -56,12 +63,15 @@ class DashScopeEmbeddingProvider:
         except httpx.HTTPError as exc:
             raise EmbeddingProviderError(f"DashScope embedding request failed: {exc}") from exc
         data = response.json()
-        items = data.get("data")
+
+        # DashScope returns output.embeddings
+        output = data.get("output", {})
+        items = output.get("embeddings")
         if not isinstance(items, list):
             raise EmbeddingProviderError(f"unexpected embedding response shape: {data}")
-        ordered = sorted(items, key=lambda item: int(item.get("index", 0)))
+
         vectors: list[np.ndarray] = []
-        for item in ordered:
+        for item in items:
             raw_vector = item.get("embedding")
             if not isinstance(raw_vector, list):
                 raise EmbeddingProviderError(f"missing embedding vector in response item: {item}")
@@ -81,10 +91,12 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
             raise EmbeddingProviderError(
                 "DASHSCOPE_API_KEY is required when FINLONGRAG_VECTOR_EMBEDDING_PROVIDER=dashscope"
             )
+        # Base URL without /text-embedding, that gets appended in _embed_batch_once
+        base_url = "https://dashscope.aliyuncs.com/api/v1/services/embeddings"
         return DashScopeEmbeddingProvider(
             api_key=api_key,
             model=settings.vector_embedding_model,
-            base_url=settings.qwen_base_url,
+            base_url=base_url,
             dimension=settings.vector_dimension,
             batch_size=settings.vector_batch_size,
             timeout_seconds=settings.request_timeout_seconds,

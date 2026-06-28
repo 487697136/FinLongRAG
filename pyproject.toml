@@ -3,7 +3,7 @@ name = "finlongrag"
 version = "0.1.0"
 description = "Agentic RAG system for financial long-document QA and services."
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "jieba>=0.42.1,<0.43",
     "numpy>=1.26.4,<2.0",

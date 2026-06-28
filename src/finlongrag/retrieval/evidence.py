@@ -27,10 +27,41 @@ def select_evidence(
             if len(selected) >= top_k:
                 return selected
 
+    # 多知识库多样性采样：确保每个 KB 都有代表
+    kb_ids = set()
     for item in scored:
-        if len(selected) >= top_k:
-            break
-        used_chars = _try_add(item, selected, seen, used_chars, max_chars)
+        kb_id = item.metadata.get("kb_id")
+        if kb_id:
+            kb_ids.add(kb_id)
+
+    if len(kb_ids) > 1:
+        # 多库模式：每个库先保证至少获得 top_k / len(kb_ids) 个位置
+        per_kb_quota = max(2, top_k // len(kb_ids))
+        kb_counts = {kb_id: 0 for kb_id in kb_ids}
+
+        # 第一轮：保证每个库都有代表
+        for item in scored:
+            if len(selected) >= top_k:
+                break
+            kb_id = item.metadata.get("kb_id")
+            if kb_id and kb_counts.get(kb_id, 0) < per_kb_quota:
+                old_used = used_chars
+                used_chars = _try_add(item, selected, seen, used_chars, max_chars)
+                if used_chars > old_used:  # 成功添加
+                    kb_counts[kb_id] = kb_counts.get(kb_id, 0) + 1
+
+        # 第二轮：按分数填充剩余位置
+        for item in scored:
+            if len(selected) >= top_k:
+                break
+            used_chars = _try_add(item, selected, seen, used_chars, max_chars)
+    else:
+        # 单库模式：原有逻辑
+        for item in scored:
+            if len(selected) >= top_k:
+                break
+            used_chars = _try_add(item, selected, seen, used_chars, max_chars)
+
     return selected
 
 

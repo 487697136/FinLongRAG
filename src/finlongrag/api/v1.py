@@ -61,6 +61,7 @@ class KnowledgeBaseCreateRequest(BaseModel):
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1)
     knowledge_base_id: str | int | None = None
+    kb_ids: list[str] | None = None  # 多知识库融合模式
     session_id: str | int | None = None
     mode: str = "auto"
     top_k: int = 20
@@ -214,8 +215,8 @@ def create_v1_router(
         limit: int = Query(default=100, ge=1, le=500),
         user: User = Depends(current_user),
     ) -> list[dict[str, Any]]:
-        _ = user
-        return [_kb_payload(kb, knowledge_service_provider()) for kb in knowledge_service_provider().list_knowledge_bases(limit=limit)]
+        # 用户隔离：只返回当前用户创建的知识库
+        return [_kb_payload(kb, knowledge_service_provider()) for kb in knowledge_service_provider().list_knowledge_bases(limit=limit, user_id=user.id)]
 
     @router.post("/knowledge-bases/", status_code=status.HTTP_201_CREATED)
     def create_knowledge_base(payload: KnowledgeBaseCreateRequest, user: User = Depends(current_user)) -> dict[str, Any]:
@@ -234,53 +235,83 @@ def create_v1_router(
 
     @router.get("/knowledge-bases/{kb_id}")
     def get_knowledge_base(kb_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
-        _ = user
+        # 用户隔离：只允许访问自己创建的知识库
         try:
-            kb = knowledge_service_provider().get_knowledge_base(kb_id)
+            kb = knowledge_service_provider().get_knowledge_base(kb_id, user_id=user.id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _kb_payload(kb, knowledge_service_provider())
 
     @router.delete("/knowledge-bases/{kb_id}")
     def delete_knowledge_base(kb_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
-        _ = user
-        repo = knowledge_service_provider().repository
-        if not hasattr(repo, "delete_knowledge_base") or not repo.delete_knowledge_base(kb_id):
+        service = knowledge_service_provider()
+        repo = service.repository
+
+        # 用户隔离：验证知识库存在且属于当前用户
+        kb = repo.get_knowledge_base(kb_id, user_id=user.id)
+        if kb is None:
             raise HTTPException(status_code=404, detail="Knowledge base not found.")
+
+        # Delete database records (cascades to documents, chunks, tasks, index_versions)
+        if not hasattr(repo, "delete_knowledge_base") or not repo.delete_knowledge_base(kb_id):
+            raise HTTPException(status_code=500, detail="Failed to delete knowledge base from database.")
+
+        # Delete FAISS index files
+        settings = settings_provider()
+        faiss_dir = settings.index_dir / "faiss" / kb_id
+        if faiss_dir.exists():
+            shutil.rmtree(faiss_dir, ignore_errors=True)
+
+        # Delete index version directories
+        versions_dir = settings.index_dir / "versions"
+        if versions_dir.exists():
+            for version_dir in versions_dir.iterdir():
+                if version_dir.is_dir():
+                    # Check if this version belongs to the deleted kb
+                    manifest = version_dir / "manifest.json"
+                    if manifest.exists():
+                        try:
+                            import json
+                            data = json.loads(manifest.read_text(encoding="utf-8"))
+                            if data.get("kb_id") == kb_id:
+                                shutil.rmtree(version_dir, ignore_errors=True)
+                        except Exception:
+                            pass
+
         clear_chat_cache()
         return {"deleted": True, "kb_id": kb_id}
 
     @router.post("/knowledge-bases/{kb_id}/rebuild")
     def rebuild_knowledge_base(kb_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
-        _ = user
+
         return {"message": "Knowledge base rebuild submitted.", **submit_ingestion(kb_id, build_index=True)}
 
     @router.post("/knowledge-bases/{kb_id}/rebuild-graph")
     def rebuild_knowledge_graph(kb_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
-        _ = user
-        knowledge_service_provider().get_knowledge_base(kb_id)
+
+        knowledge_service_provider().get_knowledge_base(kb_id, user_id=user.id)
         return {"message": "Graph rebuild is not enabled in the first integrated version.", "status": "skipped"}
 
     @router.post("/knowledge-bases/{kb_id}/rebuild-vectors")
     def rebuild_vector_index(kb_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
-        _ = user
+
         info = knowledge_service_provider().build_indexes(kb_id=kb_id)
         clear_chat_cache()
         return {"message": "Index rebuilt.", **info}
 
     @router.post("/knowledge-bases/{kb_id}/cleanup")
     def cleanup_knowledge_base(kb_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
-        _ = user
-        knowledge_service_provider().get_knowledge_base(kb_id)
+
+        knowledge_service_provider().get_knowledge_base(kb_id, user_id=user.id)
         return {"message": "Cleanup is not destructive in this version.", "status": "skipped"}
 
     @router.get("/knowledge-bases/{kb_id}/stats")
     @router.get("/knowledge-bases/{kb_id}/statistics")
     def knowledge_base_stats(kb_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
-        _ = user
-        kb = knowledge_service_provider().get_knowledge_base(kb_id)
+
+        kb = knowledge_service_provider().get_knowledge_base(kb_id, user_id=user.id)
         docs = knowledge_service_provider().list_documents(kb_id, limit=10000)
-        active = knowledge_service_provider().get_active_index_version()
+        active = knowledge_service_provider().get_active_index_version(kb_id=kb_id)
         return {
             "initialized": bool(active and active.kb_id == kb_id),
             "document_count": len(docs),
@@ -296,8 +327,8 @@ def create_v1_router(
 
     @router.get("/knowledge-bases/{kb_id}/graph")
     def knowledge_base_graph(kb_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
-        _ = user
-        knowledge_service_provider().get_knowledge_base(kb_id)
+
+        knowledge_service_provider().get_knowledge_base(kb_id, user_id=user.id)
         return {
             "nodes": [],
             "edges": [],
@@ -355,9 +386,15 @@ def create_v1_router(
         deleted = repo.delete_document(document_id)
         if deleted is None:
             raise HTTPException(status_code=404, detail="Document not found.")
+
+        # Delete physical file
         Path(deleted.path).unlink(missing_ok=True)
+
+        # Trigger index rebuild for the knowledge base
+        submit_ingestion(deleted.kb_id, build_index=True)
+
         clear_chat_cache()
-        return {"deleted": True, "document_id": document_id}
+        return {"deleted": True, "document_id": document_id, "kb_id": deleted.kb_id}
 
     @router.post("/documents/{document_id}/reprocess")
     def reprocess_document(document_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
@@ -392,9 +429,18 @@ def create_v1_router(
 
     @router.post("/query/stream")
     def query_stream(payload: QueryRequest, user: User = Depends(current_user)) -> StreamingResponse:
-        _ = user
         question = payload.question.strip()
-        kb_id = "" if payload.knowledge_base_id in (None, "") else str(payload.knowledge_base_id)
+
+        # 处理单 KB 或多 KB 模式
+        kb_id = None
+        kb_ids = None
+        if payload.kb_ids:
+            # 多知识库融合模式
+            kb_ids = [str(kid) for kid in payload.kb_ids if kid]
+            kb_id = kb_ids[0] if kb_ids else ""  # 用于 conversation metadata
+        elif payload.knowledge_base_id:
+            # 单知识库隔离模式
+            kb_id = str(payload.knowledge_base_id)
 
         def event_stream():
             started = perf_counter()
@@ -402,15 +448,33 @@ def create_v1_router(
                 chat = chat_service_provider()
                 conversation_id = None if payload.session_id in (None, "") else str(payload.session_id)
                 if not conversation_id:
+                    # 用户隔离：创建会话时设置 user_id
                     conversation = chat.create_conversation(
                         title=question[:80] or "New conversation",
-                        metadata={"knowledge_base_id": kb_id, "mode": payload.mode},
+                        metadata={
+                            "knowledge_base_id": kb_id or "",
+                            "kb_ids": kb_ids or [],
+                            "mode": payload.mode
+                        },
+                        user_id=user.id,
                     )
                     conversation_id = conversation.conversation_id
-                response = chat.ask(question, conversation_id=conversation_id)
+
+                # 传递 kb_ids（多库）或 kb_id（单库）
+                response = chat.ask(
+                    question,
+                    conversation_id=conversation_id,
+                    kb_id=kb_id or None,
+                    kb_ids=kb_ids
+                )
+
                 answer = response.result.answer
-                for chunk in _chunks(answer, size=28):
+                # 流式输出：更小的块 + 适当延迟，提升用户体验
+                for chunk in _chunks(answer, size=8):  # 从 28 改为 8，更小的块
                     yield _sse_data({"content": chunk})
+                    # 短暂延迟模拟流式输出（避免一次性蹦出）
+                    import time
+                    time.sleep(0.01)  # 10ms 延迟
                 sources = [_source_payload(item) for item in response.result.evidence[: payload.top_k]]
                 yield _sse_data(
                     {
@@ -426,6 +490,8 @@ def create_v1_router(
                                 "top_k": payload.top_k,
                                 "source_count": len(sources),
                                 "index_version": response.result.metadata.get("index_version"),
+                                "knowledge_base_id": kb_id or "",
+                                "kb_ids": kb_ids or [],
                             },
                         },
                         "sources": sources,
@@ -445,23 +511,27 @@ def create_v1_router(
         limit: int = Query(default=50, ge=1, le=200),
         user: User = Depends(current_user),
     ) -> list[dict[str, Any]]:
-        _ = user
+        # 用户隔离：只返回当前用户的会话列表
         chat = chat_service_provider()
-        return [_session_summary(chat, conversation) for conversation in chat.list_conversations(limit=limit)]
+        return [_session_summary(chat, conversation) for conversation in chat.list_conversations(limit=limit, user_id=user.id)]
 
     @router.get("/query/sessions/{session_id}")
     def get_conversation_session(session_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
-        _ = user
+        # 用户隔离：只允许访问自己的会话
         chat = chat_service_provider()
-        conversation = chat.repository.get_conversation(session_id)
+        conversation = chat.repository.get_conversation(session_id, user_id=user.id)
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation session not found.")
         return {"session": _session_summary(chat, conversation), "turns": _turns_from_messages(chat.list_messages(session_id))}
 
     @router.delete("/query/sessions/{session_id}")
     def delete_conversation_session(session_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
-        _ = user
-        deleted = chat_service_provider().repository.delete_conversation(session_id)
+        # 用户隔离：先验证会话属于当前用户
+        chat = chat_service_provider()
+        conversation = chat.repository.get_conversation(session_id, user_id=user.id)
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="Conversation session not found.")
+        deleted = chat.repository.delete_conversation(session_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Conversation session not found.")
         return {"deleted": True, "session_id": session_id}
@@ -704,7 +774,7 @@ class AuthService:
 
 def _kb_payload(kb, service: KnowledgeService) -> dict[str, Any]:
     docs = service.list_documents(kb.kb_id, limit=10000)
-    active = service.get_active_index_version()
+    active = service.get_active_index_version(kb_id=kb.kb_id)
     return {
         "id": kb.kb_id,
         "kb_id": kb.kb_id,
