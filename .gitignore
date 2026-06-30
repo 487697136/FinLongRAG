@@ -22,3 +22,7 @@ frontend/*.local
 .vscode/
 .DS_Store
 .npm-cache/
+
+# Ignore Windows appdata junk
+frontend/%APPDATA%/
+frontend/APPDATA/

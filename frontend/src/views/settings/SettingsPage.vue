@@ -83,7 +83,7 @@
                         <span v-if="k.model_name" :class="['model-badge', k.model_name.startsWith('Pro/') ? 'model-badge--pro' : '']">
                           {{ k.model_name }}{{ k.model_name.startsWith('Pro/') ? '（付费）' : '' }}
                         </span>
-                        <span v-else class="model-badge model-badge--default">BAAI/bge-m3（默认·免费）</span>
+                        <span v-else class="model-badge model-badge--default">text-embedding-v4（默认）</span>
                       </div>
                     </div>
                     <span class="status-badge status-badge--success">已配置</span>
@@ -114,7 +114,7 @@
                   />
                   <template #feedback>
                     <span style="font-size:12px;color:var(--n-text-color-3)">
-                      Pro/BAAI/bge-m3 为高性能版本，与标准版使用同一 API Key
+                      Pro/text-embedding-v4 为高性能版本，与标准版使用同一 API Key
                     </span>
                   </template>
                 </n-form-item>
@@ -161,7 +161,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { NButton, NFormItem, NInput, NModal, NSelect, NSpace, NSpin, useMessage } from 'naive-ui'
-import { changePassword, deleteApiKey, fetchCurrentUser, getRuntimeStatus, saveApiKey } from '@/api/zhiyuan'
+import { changePassword, deleteApiKey, fetchCurrentUser, getRuntimeStatus, saveApiKey } from '@/api/api'
 import AppEmpty from '@/components/common/AppEmpty.vue'
 import InfoCard from '@/components/common/InfoCard.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
@@ -222,7 +222,7 @@ function resetKeyModal() {
   keyModal.provider = modalProviderOptions.value[0]?.value || ''
   keyModal.description = ''
   keyModal.apiKey = ''
-  // 嵌入模型默认取第一个（即 BAAI/bge-m3）
+  // 嵌入模型默认取第一个
   const defaultProvider = keyModal.provider
   const models = providerStore.registry?.[defaultProvider]?.default_models || []
   keyModal.modelName = models[0] || ''

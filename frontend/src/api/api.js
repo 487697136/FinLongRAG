@@ -4,14 +4,11 @@ import { hardRedirectToLogin } from '@/api/redirect'
 
 /**
  * 前端检索模式配置：只包含后端真实支持的能力。
- * - 模型直答: 纯 LLM 回答，不检索知识库
  * - 文档检索: 向量 + BM25 混合检索知识库文档
  * - 混合检索: 智能路由，自动选择最优检索策略
- * - 数值/对比分析: 面向金融数据的数值提取与对比分析
  */
 export const queryModeOptions = [
   { label: '文档检索', value: 'naive' },
-  { label: '模型直答', value: 'llm_only' },
   { label: '混合检索', value: 'auto' }
 ]
 
@@ -36,13 +33,13 @@ export async function rebuildKnowledgeBase(kbId) {
   return response.data
 }
 
-/** 仅重建知识图谱（实体抽取 + 社区报告），保留向量索引 */
+/** 保留旧接口能力，当前主流程不在前端入口暴露 */
 export async function rebuildKnowledgeGraph(kbId) {
   const response = await api.post(`/knowledge-bases/${kbId}/rebuild-graph`)
   return response.data
 }
 
-/** 仅重建向量索引（FAISS + BM25），保留知识图谱 */
+/** 保留旧接口能力，当前主流程不在前端入口暴露 */
 export async function rebuildVectorIndex(kbId) {
   const response = await api.post(`/knowledge-bases/${kbId}/rebuild-vectors`)
   return response.data

@@ -12,15 +12,15 @@
           class="chat-home__alert"
           title="暂无知识库"
         >
-          您可以使用<strong>「模型直答」</strong>模式直接进行对话；如需检索金融文档，请前往<strong>知识库中心</strong>创建并上传文档。
+          您可以使用<strong>「模型直答」</strong>模式直接进行对话；如需检索金融文档，请前往<strong>知识库</strong>创建并上传文档。
         </n-alert>
         <n-alert
-          v-else-if="selectedKnowledgeBaseStats && !selectedKnowledgeBaseStats.initialized && selectedAskMode !== 'llm_only'"
+          v-else-if="selectedKnowledgeBaseStats && !selectedKnowledgeBaseStats.initialized"
           type="warning"
           class="chat-home__alert"
           title="当前知识库尚未初始化"
         >
-          请先上传文档并完成处理，或将模式切换为<strong>「模型直答」</strong>直接开始对话。
+          请先上传文档并完成处理。
         </n-alert>
 
         <!-- 欢迎 Hero -->
@@ -32,7 +32,7 @@
             </svg>
           </div>
           <h1 class="chat-home__hero-title"><em>FinLongRAG</em> 金融智能问答</h1>
-          <p class="chat-home__hero-desc">面向金融长文本的智能检索与生成问答系统</p>
+          <p class="chat-home__hero-desc">面向金融长文本的智能问答与知识服务系统</p>
         </div>
 
         <!-- 主输入区 -->
@@ -53,7 +53,7 @@
                   v-model:value="selectedKnowledgeBaseId"
                   :options="knowledgeBaseOptions"
                   style="width: 220px; flex-shrink: 0"
-                  placeholder="选择知识库（选填，模型直答可留空）"
+                  placeholder="选择知识库"
                   size="small"
                   clearable
                 />
@@ -103,7 +103,7 @@
             <div class="home-panel__header home-panel__header--with-actions">
               <div class="home-panel__header-left">
                 <n-icon :component="TimeOutline" size="14" />
-                <span>近期会话</span>
+                <span>最近研究会话</span>
               </div>
               <button
                 v-if="recentSessions.length > 4"
@@ -130,7 +130,7 @@
                   </div>
                 </button>
               </div>
-              <p v-else class="panel-empty">发起第一次问答后，会话将在这里显示</p>
+              <p v-else class="panel-empty">从财报、研报或公告问题开始，新的研究会话会显示在这里</p>
               </n-spin>
             </div>
           </div>
@@ -139,7 +139,7 @@
           <div class="home-panel">
             <div class="home-panel__header">
               <n-icon :component="LibraryOutline" size="14" />
-              <span>知识库速览</span>
+              <span>知识资产速览</span>
             </div>
             <div class="home-panel__body">
               <n-spin :show="kbLoading" :size="16">
@@ -160,7 +160,7 @@
                   </span>
                 </button>
               </div>
-              <p v-else class="panel-empty">暂无知识库</p>
+              <p v-else class="panel-empty">还没有知识库，先去上传财报、研报、制度或公告文档</p>
               </n-spin>
             </div>
             <div v-if="knowledgeBaseList.length > 5" class="home-panel__footer">
@@ -172,34 +172,38 @@
           <div class="home-panel">
             <div class="home-panel__header">
               <n-icon :component="BarChartOutline" size="14" />
-              <span>知识库状态</span>
+              <span>当前分析上下文</span>
             </div>
             <div class="home-panel__body">
               <n-spin :show="statsLoading" :size="16">
                 <div v-if="selectedKnowledgeBaseStats" class="kb-stats-grid">
-                <div class="kb-stat-item">
-                  <span class="kb-stat-item__label">状态</span>
-                  <strong
-                    class="kb-stat-item__value"
-                    :class="selectedKnowledgeBaseStats.initialized ? 'text-success' : 'text-warning'"
-                  >
-                    {{ selectedKnowledgeBaseStats.initialized ? '已就绪' : '未初始化' }}
-                  </strong>
+                  <div class="kb-stat-item">
+                    <span class="kb-stat-item__label">当前知识库</span>
+                    <strong class="kb-stat-item__value">{{ selectedKnowledgeBase?.name || '未命名' }}</strong>
+                  </div>
+                  <div class="kb-stat-item">
+                    <span class="kb-stat-item__label">运行状态</span>
+                    <strong
+                      class="kb-stat-item__value"
+                      :class="selectedKnowledgeBaseStats.initialized ? 'text-success' : 'text-warning'"
+                    >
+                      {{ selectedKnowledgeBaseStats.initialized ? '已就绪' : '待初始化' }}
+                    </strong>
+                  </div>
+                  <div class="kb-stat-item">
+                    <span class="kb-stat-item__label">文档规模</span>
+                    <strong class="kb-stat-item__value">{{ selectedKnowledgeBaseStats.document_count || 0 }} 份</strong>
+                  </div>
+                  <div class="kb-stat-item">
+                    <span class="kb-stat-item__label">可检索片段</span>
+                    <strong class="kb-stat-item__value">{{ selectedKnowledgeBaseStats.total_chunks || 0 }}</strong>
+                  </div>
+                  <div class="kb-stat-item kb-stat-item--full">
+                    <span class="kb-stat-item__label">当前模式</span>
+                    <strong class="kb-stat-item__value">{{ currentModeLabel }}</strong>
+                  </div>
                 </div>
-                <div class="kb-stat-item">
-                  <span class="kb-stat-item__label">文档</span>
-                  <strong class="kb-stat-item__value">{{ selectedKnowledgeBaseStats.document_count || 0 }}</strong>
-                </div>
-                <div class="kb-stat-item">
-                  <span class="kb-stat-item__label">切块</span>
-                  <strong class="kb-stat-item__value">{{ selectedKnowledgeBaseStats.total_chunks || 0 }}</strong>
-                </div>
-                <div class="kb-stat-item">
-                  <span class="kb-stat-item__label">检索模式</span>
-                  <strong class="kb-stat-item__value">{{ currentModeLabel }}</strong>
-                </div>
-              </div>
-              <p v-else class="panel-empty">请在左侧选择一个知识库</p>
+              <p v-else class="panel-empty">选择一个知识库后，这里会显示当前问答所依赖的文档上下文与检索模式</p>
               </n-spin>
             </div>
           </div>
@@ -208,85 +212,10 @@
     </template>
 
     <!-- ──────────────── SESSION SCENE ──────────────── -->
-    <div v-else class="chat-session-layout" :class="{ 'chat-session-layout--collapsed': sidebarCollapsed }">
+    <div v-else class="chat-session-layout">
 
-      <!-- 移动端侧栏遮罩 -->
-      <transition name="mobile-sidebar-fade">
-        <div
-          v-if="mobileSidebarOpen"
-          class="chat-mobile-overlay"
-          @click="mobileSidebarOpen = false"
-        />
-      </transition>
-
-      <!-- 左侧会话栏（主流 AI 对话布局） -->
-      <aside class="chat-session-sidebar" :class="{ 'chat-session-sidebar--mobile-open': mobileSidebarOpen }">
-        <div class="chat-session-sidebar__top">
-          <div class="chat-session-sidebar__title">会话</div>
-          <div class="chat-session-sidebar__top-actions">
-            <!-- 移动端关闭按钮 -->
-            <button class="chat-session-sidebar__close-mobile" type="button" @click="mobileSidebarOpen = false">✕</button>
-            <button class="chat-session-sidebar__toggle" type="button" @click="sidebarCollapsed = !sidebarCollapsed">
-              {{ sidebarCollapsed ? '展开' : '收起' }}
-            </button>
-            <button class="chat-session-sidebar__new" type="button" @click="handleStartFreshChat(); mobileSidebarOpen = false">
-              新建
-            </button>
-          </div>
-        </div>
-
-        <div v-show="!sidebarCollapsed" class="chat-session-sidebar__search">
-          <n-input
-            v-model:value="sessionSearchKeyword"
-            clearable
-            placeholder="搜索会话"
-            size="small"
-          />
-        </div>
-
-        <n-spin :show="sessionLoading" :size="16" class="chat-session-sidebar__spin">
-          <div v-if="filteredSessions.length" class="chat-session-sidebar__list">
-            <button
-              v-for="sess in filteredSessions"
-              :key="sess.id"
-              type="button"
-              class="chat-session-sidebar__item"
-              :class="{ 'is-active': String(sess.id) === String(activeConversation?.session?.id) }"
-              @click="openRecentSession(sess)"
-            >
-              <div class="chat-session-sidebar__item-main">
-                <div class="chat-session-sidebar__item-title">
-                  <span v-show="!sidebarCollapsed">{{ sess.title || `会话 #${sess.id}` }}</span>
-                  <span v-show="sidebarCollapsed">#{{ sess.id }}</span>
-                </div>
-                <div v-show="!sidebarCollapsed" class="chat-session-sidebar__item-meta">
-                  <span>{{ sess.turn_count }} 轮</span>
-                  <span>{{ formatDateTime(sess.updated_at || sess.last_active_at) }}</span>
-                </div>
-              </div>
-              <n-button
-                text
-                type="error"
-                class="chat-session-sidebar__item-delete"
-                @click.stop="confirmDeleteSession(sess.id)"
-              >
-                <template #icon><n-icon :component="TrashOutline" /></template>
-              </n-button>
-            </button>
-          </div>
-          <div v-else class="chat-session-sidebar__empty">
-            暂无会话
-          </div>
-        </n-spin>
-      </aside>
-
-      <!-- 会话头部 -->
       <section class="chat-session">
       <div class="chat-session__header">
-        <!-- 移动端：打开会话列表按钮 -->
-        <button class="chat-mobile-sidebar-btn" type="button" @click="mobileSidebarOpen = true" title="查看会话列表">
-          <n-icon :component="ChatbubbleEllipsesOutline" size="16" />
-        </button>
         <button class="chat-back-btn" type="button" @click="handleStartFreshChat">
           <n-icon :component="HomeOutline" size="14" />
           <span>首页</span>
@@ -353,8 +282,8 @@
               <n-button size="small" secondary @click="draftQuestion = turn.question; handleSendQuestion()">
                 重试
               </n-button>
-              <n-button size="small" quaternary @click="selectedAskMode = 'llm_only'">
-                切到仅模型回答
+              <n-button size="small" quaternary @click="draftQuestion = turn.question; handleSendQuestion()">
+                重试（切换模式）
               </n-button>
             </template>
           </MessageList>
@@ -478,9 +407,8 @@ import {
   getConversationSessionDetail,
   getKnowledgeBaseStats,
   listConversationSessions,
-  queryModeOptions,
   uploadDocument
-} from '@/api/zhiyuan'
+} from '@/api/api'
 import {
   formatDateTime,
   statusLabelFromKnowledgeBase,
@@ -509,7 +437,6 @@ const looksLikeRefusalOrEmpty = (answerText) => {
 const getModeLabel = (mode) => {
   const map = {
     naive: '文档检索',
-    llm_only: '模型直答',
     auto: '混合检索',
   }
   return map[mode] || mode || '混合检索'
@@ -601,7 +528,6 @@ const selectedKnowledgeBase = computed(() => {
 const effectiveQueryModeOptions = computed(() => {
   return [
     { label: '文档检索', value: 'naive' },
-    { label: '模型直答', value: 'llm_only' },
     { label: '混合检索', value: 'auto' },
   ]
 })
@@ -619,7 +545,7 @@ const filteredSessions = computed(() => {
 })
 
 const conversationTurns = computed(() => activeConversation.value?.turns || [])
-const graphSourceLabel = computed(() => '--')  // 图谱功能尚未上线
+const retrievalSourceLabel = computed(() => '--')
 
 const activeModelLabel = computed(() => {
   // 会话级身份感：展示当前请求实际使用的 best model（来自后端 metadata.configured_models）
@@ -797,13 +723,12 @@ const handleStartFreshChat = async () => {
 }
 
 const ensureReadyForQuery = () => {
-  if (effectiveSendMode.value === 'llm_only') return true
   if (!selectedKnowledgeBaseId.value) {
     message.warning('请先选择知识库')
     return false
   }
   if (!selectedKnowledgeBaseStats.value?.initialized) {
-    message.warning('当前知识库尚未初始化，请先上传文档完成处理，或切换为「模型直答」模式')
+    message.warning('当前知识库尚未初始化，请先上传文档完成处理')
     return false
   }
   return true
@@ -925,6 +850,7 @@ const handleSendQuestion = async () => {
       }
     })
     if (finalPayload?.session_id) {
+      window.dispatchEvent(new CustomEvent("session-changed"))
       await loadConversationSession(finalPayload.session_id)
       await loadRecentSessions()
       await router.replace({
@@ -968,7 +894,7 @@ const handleFileSelected = async (event) => {
   if (!file) return
   try {
     await uploadDocument(selectedKnowledgeBaseId.value, file)
-    message.success('文档已提交，系统将按后台状态进行处理')
+    message.success('文档已提交，系统将按处理状态自动更新')
     await Promise.all([loadKnowledgeBases(), loadSelectedKnowledgeBaseStats()])
   } catch (error) {
     message.error(error.response?.data?.detail || '文档上传失败')
@@ -986,7 +912,6 @@ const getSourceTitle = (sourceItem, index) => {
       vector: 'vector',
       bm25: 'bm25',
       keyword: 'bm25',
-      llm_only: 'llm_only',
       auto: 'auto'
     }
     return map[v] || v
@@ -1071,6 +996,12 @@ onBeforeUnmount(() => { abortActiveStream() })
 .chat-page {
   display: flex;
   flex-direction: column;
+  min-height: 100%;
+}
+
+.chat-page--home {
+  flex: 1;
+  justify-content: center;
 }
 
 .chat-page--session {
@@ -1082,27 +1013,11 @@ onBeforeUnmount(() => { abortActiveStream() })
    SESSION LAYOUT (left sidebar)
 ══════════════════════════════════════════ */
 .chat-session-layout {
-  display: grid;
-  grid-template-columns: 292px minmax(0, 1fr);
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
   height: calc(100svh - 52px);
   min-height: 0;
   padding: 0;
-}
-
-.chat-session-layout--collapsed {
-  grid-template-columns: 56px minmax(0, 1fr);
-}
-
-.chat-session-sidebar {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--surface-card);
-  border: 1.5px solid var(--border-color);
-  border-radius: 16px;
-  box-shadow: var(--shadow-card);
-  overflow: hidden;
 }
 
 /* 主对话区：把视觉中心放在消息流与输入 */
@@ -1146,268 +1061,10 @@ onBeforeUnmount(() => { abortActiveStream() })
   gap: 10px;
 }
 
-.chat-session-sidebar__top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 12px 8px;
-}
-
-.chat-session-sidebar__top-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.chat-session-sidebar__toggle {
-  border: 1px solid var(--border-color);
-  background: transparent;
-  color: var(--text-4);
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.chat-session-sidebar__toggle:hover {
-  border-color: var(--brand-200);
-  color: var(--text-2);
-}
-
-.chat-session-sidebar__title {
-  font-size: 13px;
-  font-weight: 800;
-  color: var(--text-2);
-}
-
-.chat-session-sidebar__new {
-  border: 1px solid var(--border-color);
-  background: var(--surface-2);
-  color: var(--text-2);
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.chat-session-sidebar__new:hover {
-  border-color: var(--brand-300);
-}
-
-.chat-session-sidebar__search {
-  padding: 0 12px 10px;
-}
-
-.chat-session-sidebar__spin {
-  min-height: 0;
-  flex: 1;
-}
-
-.chat-session-sidebar__list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0 10px 10px;
-  overflow: auto;
-  max-height: 100%;
-}
-
-.chat-session-sidebar__item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  text-align: left;
-  padding: 10px 10px;
-  border-radius: 12px;
-  border: 1px solid transparent;
-  background: transparent;
-  cursor: pointer;
-}
-
-.chat-session-sidebar__item:hover {
-  background: var(--surface-2);
-}
-
-.chat-session-sidebar__item.is-active {
-  background: rgba(59, 130, 246, 0.08);
-  border-color: rgba(59, 130, 246, 0.28);
-}
-
-.chat-session-sidebar__item-main {
-  min-width: 0;
-  flex: 1;
-}
-
-.chat-session-sidebar__item-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-1);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.chat-session-sidebar__item-meta {
-  margin-top: 4px;
-  display: flex;
-  gap: 10px;
-  font-size: 12px;
-  color: var(--text-4);
-}
-
-.chat-session-sidebar__item-delete {
-  flex-shrink: 0;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-}
-
-.chat-session-sidebar__item:hover .chat-session-sidebar__item-delete,
-.chat-session-sidebar__item.is-active:hover .chat-session-sidebar__item-delete {
-  opacity: 0.9;
-  pointer-events: auto;
-}
-
-.chat-session-sidebar__empty {
-  padding: 16px 12px;
-  font-size: 12px;
-  color: var(--text-4);
-}
-
-.chat-session-layout--collapsed .chat-session-sidebar__top {
-  padding: 10px 8px;
-}
-
-.chat-session-layout--collapsed .chat-session-sidebar__title {
-  display: none;
-}
-
-.chat-session-layout--collapsed .chat-session-sidebar__top-actions {
-  flex-direction: column;
-  gap: 6px;
-}
-
-.chat-session-layout--collapsed .chat-session-sidebar__toggle,
-.chat-session-layout--collapsed .chat-session-sidebar__new {
-  width: 40px;
-  padding: 6px 0;
-  text-align: center;
-}
-
-.chat-session-layout--collapsed .chat-session-sidebar__item {
-  padding: 10px 8px;
-  justify-content: center;
-}
-
-.chat-session-layout--collapsed .chat-session-sidebar__item-main {
-  display: flex;
-  justify-content: center;
-}
-
-.chat-session-layout--collapsed .chat-session-sidebar__item-title {
-  text-align: center;
-  width: 100%;
-}
-
-.chat-session-layout--collapsed .chat-session-sidebar__item-delete {
-  display: none;
-}
-
-/* ── 移动端侧栏遮罩 ─────────────────────── */
-.chat-mobile-overlay {
-  display: none;
-}
-
-.chat-session-sidebar__close-mobile {
-  display: none;
-}
-
-.chat-mobile-sidebar-btn {
-  display: none;
-}
-
 @media (max-width: 980px) {
   .chat-session-layout {
-    grid-template-columns: 1fr;
+    flex-direction: column;
   }
-
-  /* 移动端侧栏默认隐藏，打开时以抽屉形式覆盖 */
-  .chat-session-sidebar {
-    position: fixed;
-    left: -300px;
-    top: 0;
-    width: 280px;
-    height: 100dvh;
-    z-index: 200;
-    border-radius: 0 16px 16px 0;
-    transition: left 0.26s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.18);
-  }
-
-  .chat-session-sidebar--mobile-open {
-    left: 0;
-  }
-
-  /* 移动端半透明遮罩 */
-  .chat-mobile-overlay {
-    display: block;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.45);
-    z-index: 199;
-  }
-
-  .chat-session-sidebar__close-mobile {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border: none;
-    border-radius: 50%;
-    background: var(--surface-muted);
-    color: var(--text-3);
-    font-size: 13px;
-    cursor: pointer;
-  }
-
-  /* 移动端头部显示侧栏触发按钮 */
-  .chat-mobile-sidebar-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    background: var(--surface-muted);
-    color: var(--text-3);
-    cursor: pointer;
-    flex-shrink: 0;
-    margin-right: 2px;
-  }
-
-  .chat-mobile-sidebar-btn:hover {
-    background: var(--surface-soft);
-    color: var(--text-1);
-  }
-
-  /* 隐藏收起/展开按钮（移动端全屏侧栏）*/
-  .chat-session-sidebar--mobile-open .chat-session-sidebar__toggle {
-    display: none;
-  }
-}
-
-/* 移动端侧栏遮罩过渡 */
-.mobile-sidebar-fade-enter-active,
-.mobile-sidebar-fade-leave-active {
-  transition: opacity 0.24s ease;
-}
-.mobile-sidebar-fade-enter-from,
-.mobile-sidebar-fade-leave-to {
-  opacity: 0;
 }
 
 .visually-hidden {
@@ -1425,14 +1082,17 @@ onBeforeUnmount(() => { abortActiveStream() })
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 32px;
-  padding: 8px 0 40px;
+  gap: 24px;
+  padding: 12px 48px 32px;
   width: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+  box-sizing: border-box;
 }
 
 .chat-home__alert {
   width: 100%;
-  max-width: 920px;
+  max-width: 800px;
 }
 
 /* Hero */
@@ -1440,29 +1100,29 @@ onBeforeUnmount(() => { abortActiveStream() })
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding-top: 16px;
+  gap: 10px;
+  padding-top: 12px;
 }
 
 .chat-home__hero-logo {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
+  width: 52px;
+  height: 52px;
   border-radius: 16px;
-  background: linear-gradient(135deg, #60a5fa 0%, #93c5fd 100%);
-  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.35);
-  margin-bottom: 4px;
+  background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 50%, #93c5fd 100%);
+  box-shadow: 0 8px 20px rgba(59, 130, 246, 0.28);
+  margin-bottom: 2px;
 }
 
 .chat-home__hero-title {
   margin: 0;
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 700;
   color: var(--text-1);
   text-align: center;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.3px;
 }
 
 .chat-home__hero-title em {
@@ -1475,10 +1135,10 @@ onBeforeUnmount(() => { abortActiveStream() })
 
 .chat-home__hero-desc {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   color: var(--text-4);
   text-align: center;
-  max-width: 480px;
+  max-width: 420px;
 }
 
 /* Composer */
@@ -1487,7 +1147,7 @@ onBeforeUnmount(() => { abortActiveStream() })
   flex-direction: column;
   gap: 14px;
   width: 100%;
-  max-width: 920px;
+  max-width: 800px;
 }
 
 .chat-session__model-tag {
@@ -1507,15 +1167,15 @@ onBeforeUnmount(() => { abortActiveStream() })
 .chat-home__composer {
   background: var(--surface-card);
   border: 1.5px solid var(--border-color);
-  border-radius: 18px;
+  border-radius: 16px;
   padding: 16px 16px 12px;
-  box-shadow: var(--shadow-card);
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .chat-home__composer:focus-within {
   border-color: var(--brand-400);
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.08), var(--shadow-card);
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.08), 0 4px 20px rgba(15, 23, 42, 0.06);
 }
 
 .chat-home__textarea {
@@ -1665,9 +1325,9 @@ onBeforeUnmount(() => { abortActiveStream() })
 .chat-home__panels {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 14px;
   width: 100%;
-  max-width: 920px;
+  max-width: 800px;
   align-items: stretch;
 }
 
@@ -1687,7 +1347,11 @@ onBeforeUnmount(() => { abortActiveStream() })
   }
 
   .chat-home__hero-title {
-    font-size: 24px;
+    font-size: 22px;
+  }
+  .chat-home__hero-logo {
+    width: 44px;
+    height: 44px;
   }
 }
 
@@ -1707,21 +1371,29 @@ onBeforeUnmount(() => { abortActiveStream() })
   background: var(--surface-card);
   border: 1px solid var(--border-color);
   border-radius: 14px;
-  padding: 16px;
-  box-shadow: var(--shadow-soft);
-  height: 332px;
+  padding: 18px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+  height: auto;
+  min-height: 180px;
+  max-height: calc(100vh - 460px);
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.home-panel:hover {
+  border-color: var(--brand-200);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
 }
 
 .home-panel__header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-weight: 700;
+  color: var(--text-2);
   margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .home-panel__header--with-actions {
@@ -1731,7 +1403,7 @@ onBeforeUnmount(() => { abortActiveStream() })
 .home-panel__header-left {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -1741,9 +1413,11 @@ onBeforeUnmount(() => { abortActiveStream() })
 }
 
 .home-panel__footer {
-  margin-top: 10px;
+  margin-top: 12px;
   display: flex;
   justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
 }
 
 .panel-link {
@@ -1751,34 +1425,20 @@ onBeforeUnmount(() => { abortActiveStream() })
   background: transparent;
   color: var(--brand-600);
   font-size: 12.5px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
   padding: 4px 0;
+  transition: color 0.2s ease;
 }
 
 .panel-link:hover {
   color: var(--brand-700);
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 .panel-link--muted {
   font-weight: 600;
   font-size: 12px;
   color: var(--text-4);
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.panel-link--muted:hover {
-  color: var(--brand-700);
-}
-
-.panel-empty {
-  font-size: 12px;
-  color: var(--text-5);
-  margin: 0;
-  line-height: 1.6;
 }
 
 /* Session list */
@@ -1790,18 +1450,21 @@ onBeforeUnmount(() => { abortActiveStream() })
 
 .session-item {
   width: 100%;
-  padding: 9px 11px;
-  border: 1px solid transparent;
-  border-radius: 9px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
   background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: all 0.16s ease;
+  transition: all 0.18s ease;
 }
 
 .session-item:hover {
   background: var(--surface-muted);
-  border-color: var(--border-color);
+}
+
+.session-item + .session-item {
+  border-top: 1px solid var(--border-color);
 }
 
 .session-item__title {
@@ -1815,9 +1478,9 @@ onBeforeUnmount(() => { abortActiveStream() })
 
 .session-item__meta {
   display: flex;
-  gap: 10px;
-  margin-top: 3px;
-  font-size: 11px;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 11.5px;
   color: var(--text-5);
 }
 
@@ -1825,7 +1488,7 @@ onBeforeUnmount(() => { abortActiveStream() })
 .kb-quick-list {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
 }
 
 .kb-quick-item {
@@ -1834,9 +1497,9 @@ onBeforeUnmount(() => { abortActiveStream() })
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 9px 11px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
   cursor: pointer;
   transition: all 0.16s ease;
@@ -1844,11 +1507,19 @@ onBeforeUnmount(() => { abortActiveStream() })
 
 .kb-quick-item:hover {
   background: var(--surface-muted);
+  border-color: var(--border-color);
 }
 
 .kb-quick-item.is-active {
-  background: var(--surface-soft);
-  border-color: var(--border-color);
+  background: var(--brand-soft-bg);
+  border-color: var(--brand-soft-border);
+}
+
+.panel-empty {
+  font-size: 12.5px;
+  color: var(--text-5);
+  margin: 0;
+  line-height: 1.6;
 }
 
 .kb-quick-item__left {
@@ -2160,6 +1831,9 @@ onBeforeUnmount(() => { abortActiveStream() })
   flex: 1;
   min-width: 0;
   max-width: calc(100% - 44px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 :deep(.msg-ai-header) {
@@ -2207,7 +1881,7 @@ onBeforeUnmount(() => { abortActiveStream() })
   color: var(--text-5);
 }
 
-/* AI bubble */
+/* AI bubble - dynamic width: fits content, max 66% */
 :deep(.msg-ai-bubble) {
   padding: 16px 18px;
   background: var(--surface-card);
@@ -2215,6 +1889,8 @@ onBeforeUnmount(() => { abortActiveStream() })
   border-radius: 4px 16px 16px 16px;
   box-shadow: var(--shadow-soft);
   position: relative;
+  width: fit-content;
+  max-width: 66%;
 }
 
 /* 流式生成中的气泡轻微闪烁边框 */

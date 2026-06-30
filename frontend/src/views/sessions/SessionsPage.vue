@@ -46,98 +46,69 @@
       </template>
     </FilterToolbar>
 
-    <div class="sessions-layout">
-      <SectionCard title="会话记录" description="按最近活跃时间分组，方便快速回到历史上下文。" size="compact">
-        <n-spin :show="loading">
-          <div
-            v-for="sessionGroup in groupedSessionList"
-            :key="sessionGroup.label"
-            class="session-group"
-          >
-            <div class="session-group__title">{{ sessionGroup.label }}</div>
-
-            <button
-              v-for="sessionItem in sessionGroup.items"
-              :key="sessionItem.id"
-              type="button"
-              class="session-item"
-              :class="{ 'is-active': sessionItem.id === selectedSessionId }"
-              @click="handleSelectSession(sessionItem.id)"
-            >
-              <div class="session-item__header">
-                <div>
-                  <div class="session-item__title">{{ sessionItem.title }}</div>
-                  <div class="session-item__meta">
-                    <span>{{ resolveKnowledgeBaseName(sessionItem.knowledge_base_id) }}</span>
-                    <span>{{ formatDateTime(sessionItem.updated_at || sessionItem.last_active_at) }}</span>
+    <div class="sessions-list-wrap">
+      <n-spin :show="loading">
+        <template v-if="groupedSessionList.length">
+          <div v-for="sessionGroup in groupedSessionList" :key="sessionGroup.label" class="session-group">
+            <div class="session-group__label">{{ sessionGroup.label }}</div>
+            <div class="session-card-grid">
+              <div v-for="item in sessionGroup.items" :key="item.id" class="session-card" @click="goChat(item)">
+                <div class="session-card__body">
+                  <h3 class="session-card__title">{{ item.title || '未命名会话' }}</h3>
+                  <div class="session-card__meta">
+                    <span>{{ resolveKnowledgeBaseName(item.knowledge_base_id) }}</span>
+                    <span class="session-card__sep">·</span>
+                    <span>{{ item.turn_count }} 轮</span>
+                    <span class="session-card__sep">·</span>
+                    <span>{{ formatDateTime(item.updated_at || item.last_active_at) }}</span>
                   </div>
                 </div>
-                <div class="session-item__actions">
-                  <span class="status-badge status-badge--default">{{ sessionItem.turn_count }} 轮</span>
-                  <n-button text type="error" @click.stop="confirmDeleteSession(sessionItem.id)">
-                    <template #icon>
-                      <n-icon :component="TrashOutline" />
-                    </template>
-                  </n-button>
-                </div>
-              </div>
-            </button>
-          </div>
-
-          <n-empty
-            v-if="!groupedSessionList.length"
-            description="暂无会话记录"
-            style="padding: 28px 0 8px"
-          />
-        </n-spin>
-      </SectionCard>
-
-      <div class="sessions-layout__workspace">
-        <SectionCard
-          v-if="selectedSessionRecord"
-          :title="selectedSessionRecord.title"
-          description="以下内容来自真实会话详情接口，可直接继续追问。"
-        >
-          <template #extra>
-            <n-button type="primary" @click="handleContinueSession(selectedSessionRecord)">继续会话</n-button>
-          </template>
-
-          <div class="session-overview-grid">
-            <InfoCard label="知识库" :value="resolveKnowledgeBaseName(selectedSessionRecord.knowledge_base_id)" tone="info" size="compact" />
-            <InfoCard label="轮次" :value="selectedSessionRecord.turn_count" size="compact" />
-            <InfoCard label="最后活跃" :value="formatDateTime(selectedSessionRecord.last_active_at)" size="compact" />
-          </div>
-
-          <n-spin :show="detailLoading">
-            <div v-if="selectedSessionDetail" class="turn-preview-list">
-              <div
-                v-for="turnItem in selectedSessionDetail.turns"
-                :key="turnItem.id"
-                class="turn-preview-item"
-              >
-                <div class="turn-preview-item__question">
-                  <span class="turn-preview-item__label">问题</span>
-                  <div>{{ turnItem.question }}</div>
-                </div>
-                <div class="turn-preview-item__answer">
-                  <span class="turn-preview-item__label">回答</span>
-                  <div>{{ turnItem.answer || '暂无回答' }}</div>
-                </div>
-                <div class="turn-preview-item__meta">
-                  <span>模式 {{ turnItem.mode || turnItem.requested_mode || '--' }}</span>
-                  <span>时间 {{ formatDateTime(turnItem.created_at) }}</span>
+                <div class="session-card__actions">
+                  <button class="session-card__btn" title="查看详情" @click.stop="showSessionDetail(item)">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                  <button class="session-card__btn session-card__btn--danger" title="删除" @click.stop="confirmDeleteSession(item.id)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  </button>
                 </div>
               </div>
             </div>
-            <n-empty v-else description="请选择会话后查看详情" />
-          </n-spin>
-        </SectionCard>
-
-        <SectionCard v-else title="会话详情" description="从左侧选择任意会话，即可查看完整上下文和最近轮次。" size="compact">
-          <n-empty description="请选择会话后查看详情" style="padding: 28px 0" />
-        </SectionCard>
-      </div>
+          </div>
+        </template>
+        <n-empty v-else description="暂无会话记录，去问答页发起第一次对话吧" style="padding: 48px 0" />
+      </n-spin>
     </div>
+
+    <!-- 详情弹窗 -->
+    <n-modal v-model:show="showDetailModal" preset="card" style="max-width: 680px; width: 90vw;" :mask-closable="true" closable>
+      <template #header><span style="font-weight:700;font-size:17px;">会话详情</span></template>
+      <template v-if="detailSession">
+        <div style="margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--border-color);">
+          <div style="font-size:16px;font-weight:700;color:var(--text-1);margin-bottom:8px;">{{ detailSession.title }}</div>
+          <div style="display:flex;gap:16px;font-size:13px;color:var(--text-4);flex-wrap:wrap;">
+            <span>{{ resolveKnowledgeBaseName(detailSession.knowledge_base_id) }}</span>
+            <span>{{ detailSession.turn_count }} 轮对话</span>
+            <span>{{ formatDateTime(detailSession.last_active_at) }}</span>
+          </div>
+        </div>
+        <n-spin :show="detailLoading">
+          <div v-if="detailSessionTurns.length" class="turn-preview-list">
+            <div v-for="(turn, idx) in detailSessionTurns" :key="idx" class="turn-item">
+              <div class="turn-item__label">问题 {{ idx + 1 }}</div>
+              <div class="turn-item__text">{{ turn.question }}</div>
+              <div class="turn-item__label" style="margin-top:14px;">回答</div>
+              <div class="turn-item__text turn-item__text--answer">{{ turn.answer?.slice(0, 300) || '...' }}{{ turn.answer?.length > 300 ? '...' : '' }}</div>
+              <div class="turn-item__footer">
+                <span>{{ getModeLabel(turn.mode || turn.requested_mode) }}</span>
+                <span>{{ formatDateTime(turn.created_at) }}</span>
+              </div>
+            </div>
+          </div>
+          <n-empty v-else description="暂无对话内容" style="padding:28px 0" />
+        </n-spin>
+      </template>
+    </n-modal>
+
     <!-- 删除确认弹窗 -->
     <n-modal
       v-model:show="showDeleteConfirm"
@@ -157,7 +128,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { useRouter } from 'vue-router'
 import {
@@ -176,7 +147,7 @@ import {
   deleteConversationSession,
   getConversationSessionDetail,
   listConversationSessions,
-} from '@/api/zhiyuan'
+} from '@/api/api'
 import FilterToolbar from '@/components/common/FilterToolbar.vue'
 import InfoCard from '@/components/common/InfoCard.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
@@ -198,6 +169,23 @@ const loading = ref(false)
 const showDeleteConfirm = ref(false)
 const pendingDeleteSessionId = ref(null)
 const detailLoading = ref(false)
+const showDetailModal = ref(false)
+const detailSession = ref(null)
+const detailSessionTurns = ref([])
+
+const showSessionDetail = async (session) => {
+  detailSession.value = session
+  showDetailModal.value = true
+  detailLoading.value = true
+  try {
+    const detail = await getConversationSessionDetail(session.id)
+    detailSessionTurns.value = detail.turns || []
+  } catch {
+    detailSessionTurns.value = []
+  } finally {
+    detailLoading.value = false
+  }
+}
 
 const knowledgeBaseFilterOptions = computed(() => [
   { label: '全部知识库', value: 'all' },
@@ -273,19 +261,13 @@ const loadSessionDetail = async (sessionId) => {
   }
 }
 
-const handleSelectSession = async (sessionId) => {
-  selectedSessionId.value = String(sessionId)
-  await loadSessionDetail(sessionId)
+const goChat = (session) => {
+  router.push({ path: '/chat', query: { session: String(session.id), kb: String(session.knowledge_base_id) } })
 }
 
-const handleContinueSession = async (sessionItem) => {
-  await router.push({
-    path: '/chat',
-    query: {
-      session: String(sessionItem.id),
-      kb: String(sessionItem.knowledge_base_id)
-    }
-  })
+const getModeLabel = (mode) => {
+  const m = { naive: '文档检索', auto: '混合检索' }
+  return m[mode] || mode || '--'
 }
 
 function confirmDeleteSession(sessionId) {
@@ -301,6 +283,7 @@ const handleDeleteSession = async () => {
     showDeleteConfirm.value = false
     message.success('会话已删除')
     await loadSessions()
+    window.dispatchEvent(new CustomEvent('session-changed'))
     if (selectedSessionId.value === String(sessionId)) {
       const nextSessionId = sessionRecordList.value[0]?.id
       selectedSessionId.value = nextSessionId ? String(nextSessionId) : ''
@@ -326,6 +309,11 @@ watch(selectedSessionId, async (sessionId) => {
 
 onMounted(async () => {
   await loadSessions()
+  window.addEventListener('session-changed', loadSessions)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('session-changed', loadSessions)
 })
 </script>
 
@@ -337,142 +325,101 @@ onMounted(async () => {
 }
 
 .toolbar-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  font-size: 13px;
-  color: var(--text-4);
+  display: flex; flex-wrap: wrap; gap: 16px;
+  font-size: 13px; color: var(--text-4);
 }
 
-.sessions-layout {
+.sessions-list-wrap { margin-top: 4px; }
+
+.session-group { margin-top: 28px; }
+.session-group:first-child { margin-top: 0; }
+
+.session-group__label {
+  font-size: 13px; font-weight: 700; color: var(--text-3);
+  margin-bottom: 12px; padding-left: 2px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+
+.session-card-grid {
   display: grid;
-  grid-template-columns: minmax(320px, 0.92fr) minmax(0, 1.4fr);
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 12px;
 }
 
-.sessions-layout__workspace {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.session-group + .session-group {
-  margin-top: 20px;
-}
-
-.session-group__title {
-  margin-bottom: 10px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-4);
-}
-
-.session-item {
-  width: 100%;
-  padding: 14px 16px;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
+.session-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 18px 20px;
   background: var(--surface-card);
-  text-align: left;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+.session-card:hover {
+  border-color: var(--brand-200);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.07);
+  transform: translateY(-1px);
 }
 
-.session-item + .session-item {
-  margin-top: 10px;
+.session-card__body { flex: 1; min-width: 0; }
+
+.session-card__title {
+  margin: 0 0 6px;
+  font-size: 15px; font-weight: 700; color: var(--text-1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-.session-item:hover,
-.session-item.is-active {
-  border-color: var(--brand-soft-border);
-  background: var(--surface-hover);
-  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.08);
+.session-card__meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  font-size: 12.5px; color: var(--text-4);
+}
+.session-card__sep { color: var(--text-5); }
+
+.session-card__actions {
+  display: flex; gap: 4px; flex-shrink: 0;
 }
 
-.session-item__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+.session-card__btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border: none; border-radius: 8px;
+  background: transparent; color: var(--text-4);
+  cursor: pointer; transition: all 0.15s ease;
 }
-
-.session-item__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.session-card__btn:hover {
+  background: var(--surface-hover); color: var(--brand-600);
 }
-
-.session-item__title {
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.45;
-  color: var(--text-1);
-}
-
-.session-item__meta,
-.turn-preview-item__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--text-4);
-}
-
-.session-overview-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+.session-card__btn--danger:hover {
+  background: rgba(220, 38, 38, 0.08); color: #dc2626;
 }
 
 .turn-preview-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 16px;
+  display: flex; flex-direction: column; gap: 10px;
 }
 
-.turn-preview-item {
-  padding: 14px 16px;
-  border-radius: 12px;
-  background: var(--surface-muted);
-  border: 1px solid var(--border-color);
+.turn-item {
+  padding: 14px 16px; border-radius: 12px;
+  background: var(--surface-muted); border: 1px solid var(--border-color);
 }
-
-.turn-preview-item__label {
-  display: inline-block;
+.turn-item__label {
+  font-size: 11.5px; font-weight: 700; color: var(--brand-600);
   margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--brand-700);
 }
-
-.turn-preview-item__question,
-.turn-preview-item__answer {
-  line-height: 1.7;
-  color: var(--text-2);
+.turn-item__text {
+  font-size: 14px; line-height: 1.7; color: var(--text-2);
 }
-
-.turn-preview-item__answer {
-  margin-top: 12px;
+.turn-item__text--answer {
+  color: var(--text-3);
+  font-size: 13.5px;
 }
-
-@media (max-width: 1200px) {
-  .sessions-overview-grid,
-  .sessions-layout {
-    grid-template-columns: 1fr;
-  }
+.turn-item__footer {
+  display: flex; gap: 14px; margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+  font-size: 12px; color: var(--text-4);
 }
 
 @media (max-width: 900px) {
-  .session-overview-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .session-item__header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
+  .sessions-overview-grid { grid-template-columns: 1fr; }
+  .session-card-grid { grid-template-columns: 1fr; }
 }
 </style>

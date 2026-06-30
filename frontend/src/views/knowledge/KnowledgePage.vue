@@ -1,8 +1,8 @@
 <template>
   <div class="knowledge-page page-shell">
     <PageHeader
-      title="知识库中心"
-      description="管理金融文档知识库，完成配置、上传文档、索引重建与运行维护。"
+      title="知识库"
+      description="沉淀财报、研报、公告与制度资料，构建可问答、可追溯的金融知识资产。"
     >
       <template #actions>
         <n-button type="primary" @click="showCreateModal = true">新建知识库</n-button>
@@ -34,15 +34,15 @@
     </n-modal>
 
     <div class="knowledge-overview-grid">
-      <InfoCard label="知识库总数" :value="kbStore.list.length" caption="当前账号下全部知识库" tone="info" />
-      <InfoCard label="已就绪" :value="kbStore.readyCount" caption="完成初始化且可直接问答的知识库数量" tone="muted" />
-      <InfoCard label="文档总量" :value="kbStore.documentTotal" caption="所有知识库累计上传文档数量" tone="muted" />
-      <InfoCard label="切块总量" :value="kbStore.chunkTotal" caption="后端记录的累计文本切块数量" tone="muted" />
+      <InfoCard label="知识库总数" :value="kbStore.list.length" caption="当前账号下全部金融研究知识库" tone="info" />
+      <InfoCard label="已就绪" :value="kbStore.readyCount" caption="已完成初始化，可直接进入问答分析的知识库" tone="info" />
+      <InfoCard label="文档总量" :value="kbStore.documentTotal" caption="累计纳入知识库的金融文档数量" tone="info" />
+      <InfoCard label="切块总量" :value="kbStore.chunkTotal" caption="沉淀为可检索证据片段的文本总量" tone="info" />
     </div>
 
     <FilterToolbar :tabs="statusTabs" :active-tab="selectedStatus" @update:active-tab="selectedStatus = $event">
       <template #filters>
-        <n-input v-model:value="searchKeyword" clearable placeholder="按名称或描述搜索知识库" style="min-width: 280px; flex: 1" />
+        <n-input v-model:value="searchKeyword" clearable placeholder="按名称、用途或资料范围搜索知识库" style="min-width: 280px; flex: 1" />
       </template>
     </FilterToolbar>
 
@@ -124,14 +124,10 @@
     </n-drawer>
 
     <!-- 新建知识库弹窗 -->
-    <n-modal v-model:show="showCreateModal" preset="card" style="max-width: 520px" title="新建知识库">
+    <n-modal v-model:show="showCreateModal" preset="card" style="max-width: 480px" title="新建知识库">
       <div class="create-form">
         <n-form-item label="名称"><n-input v-model:value="createForm.name" placeholder="输入知识库名称" /></n-form-item>
-        <n-form-item label="描述"><n-input v-model:value="createForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 5 }" /></n-form-item>
-        <div class="create-form__switches">
-          <n-form-item label="启用文档检索"><n-switch v-model:value="createForm.enable_naive_rag" /></n-form-item>
-          <n-form-item label="启用关键词检索"><n-switch v-model:value="createForm.enable_bm25" /></n-form-item>
-        </div>
+        <n-form-item label="描述（可选）"><n-input v-model:value="createForm.description" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="简要说明知识库的用途或资料范围" /></n-form-item>
       </div>
       <template #footer>
         <n-space justify="end">
@@ -145,7 +141,7 @@
     <n-modal v-model:show="showDeleteConfirm" preset="dialog" type="error" title="删除知识库" positive-text="确认删除" negative-text="取消" :loading="deleting" @positive-click="handleDeleteKnowledgeBase" @negative-click="showDeleteConfirm = false">
       <template #default>
         <p>确定要删除知识库 <strong>「{{ pendingDeleteKb?.name }}」</strong> 吗？</p>
-        <p style="color: var(--text-4); font-size: 13px; margin-top: 8px">此操作不可恢复，所有相关文档和图谱数据将被永久清除。</p>
+        <p style="color: var(--text-4); font-size: 13px; margin-top: 8px">此操作不可恢复，所有相关文档和检索索引数据将被永久清除。</p>
       </template>
     </n-modal>
   </div>
@@ -155,7 +151,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { NButton, NDrawer, NDrawerContent, NFormItem, NIcon, NInput, NModal, NSpace, NSpin, NSwitch, useMessage } from 'naive-ui'
-import { cleanupKnowledgeBase, createKnowledgeBase, deleteKnowledgeBase, rebuildKnowledgeBase } from '@/api/zhiyuan'
+import { cleanupKnowledgeBase, createKnowledgeBase, deleteKnowledgeBase, rebuildKnowledgeBase } from '@/api/api'
 import AppEmpty from '@/components/common/AppEmpty.vue'
 import DetailPanel from '@/components/common/DetailPanel.vue'
 import FilterToolbar from '@/components/common/FilterToolbar.vue'
@@ -193,7 +189,7 @@ const activeDetailTab = ref('basic')
 const detailStatsLoading = ref(false)
 const selectedKnowledgeBaseStats = ref(null)
 
-const createForm = reactive({ name: '', description: '', enable_naive_rag: true, enable_bm25: false })
+const createForm = reactive({ name: '', description: '' })
 const detailTabs = [{ label: '基本信息', value: 'basic' }, { label: '运行状态', value: 'stats' }]
 
 const statusTabs = computed(() => [
@@ -230,8 +226,6 @@ async function loadKnowledgeBaseStats(kbId) {
 function resetCreateForm() {
   createForm.name = ''
   createForm.description = ''
-  createForm.enable_naive_rag = true
-  createForm.enable_bm25 = false
 }
 
 async function handleCreateKnowledgeBase() {

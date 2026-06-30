@@ -82,20 +82,26 @@ const showMobileSidebar = ref(false)
 }
 
 .app-layout__content {
-  min-height: 100vh;
+  min-height: calc(100vh - 0px);
   width: min(100%, var(--layout-content-max));
   margin: 0 auto;
-  padding: 28px 32px 32px;
+  padding: 24px 32px 28px;
 }
 
 .app-layout__content--full {
   width: 100%;
+  height: 100%;
   margin: 0;
   padding: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .app-layout__mobile-bar {
   display: none;
+  backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--surface-card) 84%, transparent);
+  border-bottom: 1px solid var(--border-color);
 }
 
 @media (max-width: 960px) {
@@ -107,7 +113,7 @@ const showMobileSidebar = ref(false)
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 16px 8px;
+    padding: 14px 16px 10px;
   }
 
   .app-layout__mobile-title {
@@ -123,7 +129,7 @@ const showMobileSidebar = ref(false)
 
   .app-layout__content {
     width: 100%;
-    padding: 16px 18px 28px;
+    padding: 14px 16px 24px;
   }
 }
 </style>

@@ -1,6 +1,6 @@
 <template>
   <div class="documents-page page-shell">
-    <PageHeader title="文档中心" description="集中管理知识库文档上传、处理状态与失败恢复。支持 TXT、Markdown、PDF、Word、Excel、HTML 等格式。">
+    <PageHeader title="文档资产" description="集中管理金融资料上传、处理状态与失败恢复，确保知识库中的证据始终可追溯、可检索。">
       <template #actions>
         <n-space>
           <input ref="fileInputRef" type="file" class="visually-hidden" accept=".txt,.md,.json,.csv,.pdf,.xlsx,.html,.htm" @change="handleFileSelected" />
@@ -12,14 +12,14 @@
     </PageHeader>
 
     <div class="documents-overview-grid">
-      <InfoCard label="已完成" :value="completedCount" caption="已完成切块与图谱处理的文档数" tone="info" />
-      <InfoCard label="处理中" :value="processingCount" caption="后台任务会自动轮询刷新" tone="muted" />
-      <InfoCard label="失败任务" :value="failedCount" caption="支持一键重试并重建知识库运行时" tone="muted" />
+      <InfoCard label="已完成" :value="completedCount" caption="已完成解析并可作为问答证据使用的文档" tone="info" />
+      <InfoCard label="处理中" :value="processingCount" caption="系统自动轮询更新文档处理进度" tone="info" />
+      <InfoCard label="失败任务" :value="failedCount" caption="支持重试并重新构建对应知识库索引" tone="info" />
     </div>
 
     <FilterToolbar :tabs="documentTabs" :active-tab="activeDocumentTab" @update:active-tab="activeDocumentTab = $event">
       <template #filters>
-        <n-input v-model:value="searchKeyword" clearable placeholder="搜索文档名称" style="min-width: 260px; flex: 1" />
+        <n-input v-model:value="searchKeyword" clearable placeholder="搜索文档名称或资料主题" style="min-width: 260px; flex: 1" />
         <n-select v-model:value="selectedKnowledgeBaseId" :options="knowledgeBaseFilterOptions" style="width: 220px" />
         <n-select v-model:value="selectedStatus" :options="statusOptions" style="width: 160px" />
       </template>
@@ -34,7 +34,7 @@
       </template>
     </FilterToolbar>
 
-    <SectionCard title="文档任务列表" description="支持查看详情、失败重试和运行时感知删除。" flush>
+    <SectionCard title="文档任务列表" description="查看解析状态、证据切块产出与失败恢复情况。" flush>
       <n-spin :show="loading">
         <n-data-table :columns="documentTableColumns" :data="filteredDocumentList" :pagination="{ pageSize: 8 }" :row-key="(row) => row.id" />
         <AppEmpty v-if="!filteredDocumentList.length" description="当前筛选条件下没有文档" />
@@ -87,7 +87,7 @@
             <div>
               <div class="delete-warn-box__title">将触发知识库全量重建</div>
               <div class="delete-warn-box__desc">
-                该文档已成功入库，删除后系统需要对知识库内剩余 <strong>{{ deleteKbRemainingCount }}</strong> 个文档重新进行向量化和图谱构建，耗时可能较长。
+                该文档已成功入库，删除后系统需要对知识库内剩余 <strong>{{ deleteKbRemainingCount }}</strong> 个文档重新进行向量化和索引构建，耗时可能较长。
               </div>
             </div>
           </div>
@@ -105,7 +105,7 @@ import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NDataTable, NDrawer, NDrawerContent, NModal, NProgress, NSpace, NInput, NSelect, NSpin, useMessage } from 'naive-ui'
 import { EyeOutline, RefreshOutline, TrashOutline } from '@vicons/ionicons5'
-import { deleteDocument, getDocumentProgress, listDocumentsByKnowledgeBase, reprocessDocument, uploadDocument } from '@/api/zhiyuan'
+import { deleteDocument, getDocumentProgress, listDocumentsByKnowledgeBase, reprocessDocument, uploadDocument } from '@/api/api'
 import AppEmpty from '@/components/common/AppEmpty.vue'
 import DetailPanel from '@/components/common/DetailPanel.vue'
 import FilterToolbar from '@/components/common/FilterToolbar.vue'
@@ -263,7 +263,7 @@ async function handleFileSelected(event) {
   try {
     await uploadDocument(selectedKnowledgeBaseId.value, file)
     loadingMsg.destroy()
-    message.success('文档已提交，后台正在处理（页面将自动刷新状态）')
+    message.success('文档已提交，系统正在处理（页面将自动刷新状态）')
     kbStore.invalidate()
     await loadDocuments()
   } catch (error) {

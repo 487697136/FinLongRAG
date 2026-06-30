@@ -26,19 +26,19 @@ const router = createRouter({
           path: 'sessions',
           name: 'Sessions',
           component: () => import('@/views/sessions/SessionsPage.vue'),
-          meta: { title: '会话中心' }
+          meta: { title: '会话记录' }
         },
         {
           path: 'knowledge',
           name: 'Knowledge',
           component: () => import('@/views/knowledge/KnowledgePage.vue'),
-          meta: { title: '知识库中心' }
+          meta: { title: '知识库' }
         },
         {
           path: 'documents',
           name: 'Documents',
           component: () => import('@/views/documents/DocumentsPage.vue'),
-          meta: { title: '文档中心' }
+          meta: { title: '文档资产' }
         },
         {
           path: 'graph',
@@ -50,13 +50,13 @@ const router = createRouter({
           path: 'test-sets',
           name: 'TestSets',
           component: () => import('@/views/evaluation/TestSetManage.vue'),
-          meta: { title: '测试集管理' }
+          meta: { title: '测试集' }
         },
         {
           path: 'evaluations',
           name: 'Evaluations',
           component: () => import('@/views/evaluation/EvaluationRun.vue'),
-          meta: { title: '评测中心' }
+          meta: { title: '评测分析' }
         },
         {
           path: 'evaluations/:id',

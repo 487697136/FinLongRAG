@@ -2,7 +2,7 @@
   <div class="fin-analysis-page page-shell">
     <PageHeader
       title="金融数据分析"
-      description="面向金融长文本的数值提取、对比分析与趋势洞察。在问答页中选择「数值/对比分析」模式使用此能力。"
+      description="面向金融长文本的数值提取、对比分析与趋势洞察。在问答页中上传金融文档后即可使用此能力。"
     />
 
     <!-- 概览卡片 -->
@@ -77,7 +77,7 @@
     <!-- 使用提示 -->
     <div class="fin-tip">
       <n-icon size="16" :component="InformationCircleOutline" />
-      <span>选择知识库后，在智能问答页中使用「数值/对比分析」或「混合检索」模式进行深入分析。需要先在文档中心上传金融文档。</span>
+      <span>选择知识库后，在智能问答页中使用「数值/对比分析」或「混合检索」模式进行深入分析。需要先在文档资产页上传金融文档。</span>
     </div>
   </div>
 </template>

@@ -1,43 +1,30 @@
 <template>
   <div class="login-page">
-    <!-- Decorative background elements -->
     <div class="login-page__bg-glow login-page__bg-glow--1" />
     <div class="login-page__bg-glow login-page__bg-glow--2" />
     <div class="login-page__bg-grid" />
 
-    <section class="brand">
-      <div class="brand__mark">
-        <div class="brand__mark-inner">
+    <div class="login-grid fade-in-up">
+      <!-- Brand (left) -->
+      <section class="login-brand">
+        <div class="login-brand__icon">
           <n-icon :component="GitNetworkOutline" size="44" />
         </div>
-      </div>
-      <h1 class="brand__title">FinLongRAG</h1>
-      <p class="brand__desc">面向金融长文本的 Agentic RAG 问答与服务系统</p>
-      <div class="brand__features">
-        <div class="brand__feature-item">
-          <div class="brand__feature-dot" />
-          <span>结构化文档解析</span>
-        </div>
-        <div class="brand__feature-item">
-          <div class="brand__feature-dot" />
-          <span>混合检索与证据引用</span>
-        </div>
-        <div class="brand__feature-item">
-          <div class="brand__feature-dot" />
-          <span>持续对话与评测闭环</span>
-        </div>
-      </div>
-    </section>
+        <div class="login-brand__eyebrow">金融研究智能工作台</div>
+        <h1 class="login-brand__title">FinLongRAG</h1>
+        <p class="login-brand__desc">基于 Agentic RAG 的<br/>面向金融长文本的智能问答与知识服务系统</p>
+      </section>
 
-    <div class="login-card-wrap fade-in-up">
+      <!-- Card (right) -->
       <n-card class="login-card glass-card" :bordered="false">
+        <!-- Header -->
         <div class="login-card__header">
           <div class="login-card__header-icon">
-            <n-icon :component="activeTab === 'login' ? LockClosedOutline : PersonOutline" size="22" />
+            <n-icon :component="activeTab === 'login' ? LockClosedOutline : PersonOutline" size="24" />
           </div>
           <div>
-            <h2 class="login-card__title">{{ activeTab === 'login' ? '欢迎回来' : '创建账号' }}</h2>
-            <p class="login-card__subtitle">{{ activeTab === 'login' ? '请登录以继续使用系统' : '注册新账号以开始使用' }}</p>
+            <h2 class="login-card__title">{{ activeTab === 'login' ? '进入 FinLongRAG' : '创建账号' }}</h2>
+            <p class="login-card__subtitle">{{ activeTab === 'login' ? '登录后进入金融文档问答与知识服务工作台' : '注册后即可开始构建金融知识库与问答会话' }}</p>
           </div>
         </div>
 
@@ -53,7 +40,7 @@
               <n-form-item path="username">
                 <n-input
                   v-model:value="loginForm.username"
-                  placeholder="用户名或邮箱"
+                  placeholder="用户名或邮箱地址"
                   :input-props="{ autocomplete: 'username' }"
                   @keyup.enter="handleLogin"
                 >
@@ -80,7 +67,6 @@
                 <span v-if="!loading">登 录</span>
                 <span v-else class="login-btn__spinner" />
               </button>
-              <p class="login-form__hint">本地开发默认账号：admin / finlongrag</p>
             </n-form>
           </n-tab-pane>
 
@@ -94,14 +80,14 @@
             >
               <div class="register-grid">
                 <n-form-item path="username">
-                  <n-input v-model:value="registerForm.username" placeholder="用户名" :input-props="{ autocomplete: 'username' }">
+                  <n-input v-model:value="registerForm.username" placeholder="用户名">
                     <template #prefix>
                       <n-icon :component="PersonOutline" />
                     </template>
                   </n-input>
                 </n-form-item>
                 <n-form-item path="email">
-                  <n-input v-model:value="registerForm.email" placeholder="邮箱" :input-props="{ autocomplete: 'email' }">
+                  <n-input v-model:value="registerForm.email" placeholder="邮箱">
                     <template #prefix>
                       <n-icon :component="MailOutline" />
                     </template>
@@ -112,8 +98,7 @@
                     v-model:value="registerForm.password"
                     type="password"
                     show-password-on="click"
-                    placeholder="密码，至少 6 位"
-                    :input-props="{ autocomplete: 'new-password' }"
+                    placeholder="设置登录密码（至少6位）"
                   >
                     <template #prefix>
                       <n-icon :component="LockClosedOutline" />
@@ -126,7 +111,6 @@
                     type="password"
                     show-password-on="click"
                     placeholder="确认密码"
-                    :input-props="{ autocomplete: 'new-password' }"
                     @keyup.enter="handleRegister"
                   >
                     <template #prefix>
@@ -151,7 +135,6 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  NButton,
   NCard,
   NForm,
   NFormItem,
@@ -255,153 +238,163 @@ async function handleRegister() {
 </script>
 
 <style scoped>
-/* ─── Page shell ─── */
+/* ─── Page ─── */
 .login-page {
   position: relative;
   min-height: 100vh;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 460px;
+  display: flex;
   align-items: center;
-  gap: 80px;
-  padding: 48px clamp(24px, 8vw, 100px);
+  justify-content: center;
+  padding: 48px 24px;
   background: linear-gradient(135deg, #0b1121 0%, #142454 35%, #1e3a8a 65%, #2563eb 100%);
   overflow: hidden;
 }
 
-/* ─── Decorative background ─── */
+/* ─── Decorations ─── */
 .login-page__bg-glow {
   position: absolute;
   border-radius: 50%;
   pointer-events: none;
 }
-
 .login-page__bg-glow--1 {
-  top: -18%;
-  left: -8%;
-  width: 620px;
-  height: 620px;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.22) 0%, transparent 68%);
+  top: -15%;
+  left: -5%;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.20) 0%, transparent 68%);
 }
-
 .login-page__bg-glow--2 {
-  bottom: -12%;
-  right: -6%;
-  width: 480px;
-  height: 480px;
-  background: radial-gradient(circle, rgba(96, 165, 250, 0.16) 0%, transparent 66%);
+  bottom: -10%;
+  right: -5%;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(96, 165, 250, 0.14) 0%, transparent 66%);
 }
-
 .login-page__bg-grid {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
   background-size: 60px 60px;
   pointer-events: none;
 }
 
-/* ─── Brand (left) ─── */
-.brand {
+/* ─── Grid: left brand + right card, centered ─── */
+.login-grid {
   position: relative;
   z-index: 1;
+  display: grid;
+  grid-template-columns: 500px 520px;
+  gap: 72px;
+  align-items: center;
+}
+
+/* ─── Brand (left) ─── */
+.login-brand {
   color: #fff;
 }
 
-.brand__mark {
-  margin-bottom: 32px;
-}
-
-.brand__mark-inner {
-  width: 88px;
-  height: 88px;
+.login-brand__icon {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 80px;
+  height: 80px;
   border-radius: 20px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.06));
-  border: 1px solid rgba(255, 255, 255, 0.24);
-  box-shadow: 0 24px 64px rgba(59, 130, 246, 0.32);
+  background: linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06));
+  border: 1px solid rgba(255,255,255,0.24);
+  color: #93c5fd;
+  margin-bottom: 28px;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  color: #93c5fd;
+  box-shadow: 0 20px 60px rgba(59, 130, 246, 0.30);
 }
 
-.brand__title {
-  margin: 0 0 16px;
-  font-size: 54px;
+.login-brand__title {
+  margin: 0 0 20px;
+  font-size: 52px;
   font-weight: 800;
   line-height: 1;
-  letter-spacing: -0.5px;
+  letter-spacing: -1px;
   background: linear-gradient(135deg, #ffffff 0%, #bfdbfe 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
-.brand__desc {
-  margin: 0;
-  max-width: 580px;
-  font-size: 19px;
+.login-brand__desc {
+  margin: 0 0 28px;
+  font-size: 18px;
   line-height: 1.65;
-  color: rgba(255, 255, 255, 0.82);
+  color: rgba(255,255,255,0.80);
 }
 
-.brand__features {
+.login-brand__features {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
-  margin-top: 36px;
-}
-
-.brand__feature-item {
-  display: inline-flex;
-  align-items: center;
   gap: 10px;
-  padding: 10px 18px;
+  margin-bottom: 28px;
+}
+
+.login-brand__tag {
+  padding: 8px 16px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.10);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 13.5px;
+  background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.14);
+  color: rgba(255,255,255,0.88);
+  font-size: 13px;
   font-weight: 500;
-  transition: background 0.22s ease, border-color 0.22s ease;
 }
 
-.brand__feature-item:hover {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.24);
+.login-brand__metrics {
+  display: grid;
+  gap: 14px;
 }
 
-.brand__feature-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #60a5fa;
-  box-shadow: 0 0 8px rgba(96, 165, 250, 0.6);
-  flex-shrink: 0;
+.login-brand__metric {
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.05));
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.login-brand__metric strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.login-brand__metric span {
+  display: block;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(255,255,255,0.74);
 }
 
 /* ─── Card (right) ─── */
-.login-card-wrap {
-  position: relative;
-  z-index: 1;
-}
-
 .login-card {
   border-radius: 20px;
-  box-shadow: var(--shadow-login-card);
-  padding: 36px 32px 32px;
+  box-shadow: 0 32px 80px rgba(15, 23, 42, 0.38);
+  padding: 40px 36px 32px;
+  background: linear-gradient(180deg, #ffffff 0%, #f2f6fc 100%);
+  border: 1px solid rgba(219, 227, 240, 0.6);
+}
+.login-card :deep(.n-card__content) {
+  padding: 0 !important;
 }
 
 .login-card__header {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 24px;
-  padding-bottom: 20px;
+  gap: 16px;
+  margin-bottom: 28px;
+  padding-bottom: 24px;
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -409,9 +402,9 @@ async function handleRegister() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 50px;
+  height: 50px;
+  border-radius: 14px;
   background: linear-gradient(135deg, var(--brand-100), var(--brand-200));
   color: var(--brand-600);
   flex-shrink: 0;
@@ -419,14 +412,14 @@ async function handleRegister() {
 
 .login-card__title {
   margin: 0;
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--text-1);
 }
 
 .login-card__subtitle {
-  margin: 3px 0 0;
-  font-size: 13.5px;
+  margin: 4px 0 0;
+  font-size: 14px;
   color: var(--text-4);
 }
 
@@ -441,117 +434,101 @@ async function handleRegister() {
 }
 
 .login-form :deep(.n-form-item) {
-  --n-feedback-font-size: 12px;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .login-form :deep(.n-form-item:last-of-type) {
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
-.login-form__hint {
-  margin: 12px 0 0;
-  font-size: 12.5px;
-  color: var(--text-5);
-  text-align: center;
+.login-form :deep(.n-input) {
+  --n-height: 46px;
+  --n-font-size: 14px;
 }
 
 /* ─── Register grid ─── */
 .register-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
-
 .register-grid :deep(.n-form-item) {
-  margin-bottom: 16px;
+  margin-bottom: 0;
+}
+.register-grid {
+  margin-bottom: 20px;
+}
+.register-grid :deep(.n-form-item .n-form-item-label) {
+  display: none;
+}
+.register-grid :deep(.n-input) {
+  --n-height: 32px;
+  --n-font-size: 13px;
+}
+.register-grid :deep(.n-form-item-feedback-wrapper) {
+  display: none;
 }
 
-@media (max-width: 480px) {
-  .register-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* ─── Custom gradient button ─── */
+/* ─── Login button ─── */
 .login-btn {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 46px;
-  margin-top: 4px;
+  height: 50px;
   border: none;
   border-radius: 12px;
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%);
   color: #fff;
-  font-size: 15.5px;
+  font-size: 16px;
   font-weight: 600;
   letter-spacing: 2px;
   cursor: pointer;
   transition: all 0.24s ease;
   box-shadow: 0 6px 24px rgba(37, 99, 235, 0.32);
 }
-
 .login-btn:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 12px 32px rgba(37, 99, 235, 0.44);
 }
-
 .login-btn:active:not(:disabled) {
   transform: translateY(0);
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
 }
-
 .login-btn:disabled {
   opacity: 0.65;
   cursor: not-allowed;
   transform: none;
   box-shadow: 0 4px 16px rgba(37, 99, 235, 0.18);
 }
-
 .login-btn__spinner {
   width: 20px;
   height: 20px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 2px solid rgba(255,255,255,0.3);
   border-top-color: #fff;
   border-radius: 50%;
   animation: login-spin 0.7s linear infinite;
 }
-
-@keyframes login-spin {
-  to { transform: rotate(360deg); }
-}
+@keyframes login-spin { to { transform: rotate(360deg); } }
 
 /* ─── Responsive ─── */
-@media (max-width: 960px) {
-  .login-page {
+@media (max-width: 1080px) {
+  .login-grid {
     grid-template-columns: 1fr;
-    gap: 32px;
-    padding: 36px 20px;
+    gap: 36px;
+    max-width: 440px;
   }
-
-  .brand__title {
-    font-size: 40px;
+  .login-brand {
+    text-align: center;
   }
-
-  .brand__desc {
-    font-size: 16px;
+  .login-brand__icon,
+  .login-brand__eyebrow {
+    margin-left: auto;
+    margin-right: auto;
   }
-
-  .brand__features {
-    gap: 10px;
-    margin-top: 24px;
-  }
-
-  .brand__feature-item {
-    font-size: 12.5px;
-    padding: 8px 14px;
-  }
-
-  .login-card {
-    padding: 28px 22px 24px;
-  }
+  .login-brand__title { font-size: 36px; }
+  .login-brand__desc { font-size: 16px; }
+  .login-card { padding: 28px 22px 24px; }
 }
 </style>

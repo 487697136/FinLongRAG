@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { getKnowledgeBaseStats, listKnowledgeBases } from '@/api/zhiyuan'
+import { getKnowledgeBaseStats, listKnowledgeBases } from '@/api/api'
 
 const CACHE_TTL = 30_000 // 30s 内不重复请求
 

@@ -2,8 +2,8 @@
   <n-layout class="page">
     <n-layout-header class="page__header">
       <div>
-        <h2>测试集管理</h2>
-        <p>上传用于检索评测的 CSV 或 Excel 文件，字段支持 question、answer、source 及常见中文别名。</p>
+        <h2>测试集</h2>
+        <p>上传金融问答评测样本，统一管理问题、标准答案与期望来源，用于验证检索与证据命中效果。</p>
       </div>
       <n-upload
         :custom-request="handleUpload"
@@ -28,7 +28,7 @@
               :show-file-list="false"
               accept=".csv,.xlsx,.xls"
             >
-              <n-button type="primary">上传测试集</n-button>
+              <n-button type="primary">上传首个测试集</n-button>
             </n-upload>
           </template>
         </n-empty>
@@ -87,7 +87,7 @@ import {
   useMessage
 } from 'naive-ui'
 import { AddOutline } from '@vicons/ionicons5'
-import { deleteTestSet, getTestSets, uploadTestSet } from '@/api/zhiyuan'
+import { deleteTestSet, getTestSets, uploadTestSet } from '@/api/api'
 import { evalFormatDate } from '@/utils/formatters'
 
 const message = useMessage()

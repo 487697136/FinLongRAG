@@ -2,8 +2,8 @@
   <n-layout class="page">
     <n-layout-header class="page__header">
       <div>
-        <h2>评测中心</h2>
-        <p>基于测试集评估当前知识库的证据召回能力，第一版聚焦 Recall 与 MRR。</p>
+        <h2>评测分析</h2>
+        <p>基于测试集验证知识库在金融问答中的证据召回质量，当前聚焦 Recall 与 MRR 两项核心指标。</p>
       </div>
       <n-button type="primary" @click="openCreateModal">
         <template #icon>
@@ -38,7 +38,7 @@
       <n-spin :show="loading">
         <n-empty v-if="!loading && filteredEvaluations.length === 0" description="暂无评测记录">
           <template #extra>
-            <n-button type="primary" @click="openCreateModal">新建评测</n-button>
+            <n-button type="primary" @click="openCreateModal">创建首个评测任务</n-button>
           </template>
         </n-empty>
         <n-data-table
@@ -56,7 +56,7 @@
     <n-modal
       v-model:show="showCreateModal"
       preset="card"
-      title="新建评测"
+      title="创建评测任务"
       style="width: 560px"
       :mask-closable="false"
     >
@@ -86,7 +86,7 @@
       </n-form>
 
       <n-alert type="info" :bordered="false" style="margin-top: 8px">
-        当前评测会调用 FinLongRAG 的检索链路，生成检索级报告。答案级 LLM Judge 可以在后续接入。
+        当前评测会调用 FinLongRAG 的真实检索链路，输出检索级分析报告。答案级 LLM Judge 可在后续评测体系中扩展。
       </n-alert>
 
       <template #footer>
@@ -133,7 +133,7 @@ import {
   getEvaluations,
   getKnowledgeBases,
   getTestSets
-} from '@/api/zhiyuan'
+} from '@/api/api'
 import { evalFormatDate, evalFormatNumber, evalFormatPercent, evalStatusLabel, evalStatusType, evalStrategyLabel } from '@/utils/formatters'
 
 const router = useRouter()

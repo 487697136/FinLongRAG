@@ -49,10 +49,13 @@ class KnowledgeService:
         name: str,
         description: str = "",
         metadata: dict[str, Any] | None = None,
+        created_by: str | None = None,
     ) -> KnowledgeBaseRecord:
         if not name.strip():
             raise ValueError("knowledge base name is required")
-        return self.repository.create_knowledge_base(name=name, description=description, metadata=metadata)
+        return self.repository.create_knowledge_base(
+            name=name, description=description, metadata=metadata, created_by=created_by
+        )
 
     def list_knowledge_bases(self, *, limit: int = 100, user_id: str | None = None) -> list[KnowledgeBaseRecord]:
         return self.repository.list_knowledge_bases(limit=limit, user_id=user_id)

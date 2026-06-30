@@ -82,11 +82,11 @@ defineProps({
 }
 
 .info-card :deep(.n-card__content) {
-  padding: 18px 20px;
+  padding: 14px 18px;
 }
 
 .info-card--compact :deep(.n-card__content) {
-  padding: 16px 18px;
+  padding: 12px 16px;
 }
 
 .info-card--default {
@@ -117,18 +117,18 @@ defineProps({
 }
 
 .info-card__value {
-  margin-top: 10px;
-  font-size: clamp(24px, 2.2vw, 30px);
+  margin-top: 6px;
+  font-size: clamp(22px, 2vw, 28px);
   font-weight: 800;
   line-height: 1.15;
   color: var(--text-1);
-  letter-spacing: -0.5px;
+  letter-spacing: -0.3px;
 }
 
 .info-card__caption {
-  margin-top: 8px;
-  font-size: 12.5px;
-  line-height: 1.6;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--text-4);
 }
 </style>

@@ -223,6 +223,7 @@ def create_v1_router(
         kb = knowledge_service_provider().create_knowledge_base(
             name=payload.name,
             description=payload.description,
+            created_by=str(user.id),
             metadata={
                 "owner_id": user.id,
                 "tenant_id": user.id,

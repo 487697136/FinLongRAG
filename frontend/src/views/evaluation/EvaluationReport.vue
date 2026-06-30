@@ -10,7 +10,7 @@
         </n-button>
         <div>
           <h2>评测报告</h2>
-          <p v-if="report">{{ report.kb_name }} / {{ report.test_set_name }}</p>
+          <p v-if="report">{{ report.kb_name }} / {{ report.test_set_name }} / 金融检索表现分析</p>
         </div>
       </div>
       <n-space>
@@ -142,7 +142,7 @@ import {
   useMessage
 } from 'naive-ui'
 import { ArrowBackOutline, DownloadOutline } from '@vicons/ionicons5'
-import { compareEvaluations, getEvaluation, getEvaluations } from '@/api/zhiyuan'
+import { compareEvaluations, getEvaluation, getEvaluations } from '@/api/api'
 import { evalFormatDate, evalFormatNumber, evalFormatPercent, evalStatusLabel, evalStatusType, evalStrategyLabel } from '@/utils/formatters'
 
 const route = useRoute()
