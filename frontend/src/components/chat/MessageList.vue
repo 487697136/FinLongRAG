@@ -14,7 +14,7 @@
         </div>
         <div class="msg-ai-content">
           <div class="msg-ai-header">
-            <span class="msg-ai-sender">知源</span>
+            <span class="msg-ai-sender">FinLongRAG</span>
             <span v-if="turn.created_at && !turn.streaming" class="msg-ai-time">
               {{ formatTime(turn.created_at) }}
             </span>
@@ -81,15 +81,26 @@
               </svg>
             </button>
             <transition name="sources-expand">
-              <div v-if="sourcesOpenMap[turn.id]" class="source-chips">
-                <span
-                  v-for="(src, idx) in deduplicateSources(turn.sources)"
-                  :key="src._dedupeKey"
-                  class="source-chip"
-                  :title="src._tooltip"
+              <div v-if="sourcesOpenMap[turn.id]" class="source-evidence-list">
+                <article
+                  v-for="(src, idx) in turn.sources"
+                  :key="idx"
+                  class="source-evidence-card"
+                  :title="getSourceTooltip(src)"
                 >
-                  {{ src._label }}
-                </span>
+                  <div class="source-evidence-card__header">
+                    <div class="source-evidence-card__title">{{ getSourceTitle(src, idx) }}</div>
+                    <span v-if="src?.score != null" class="source-evidence-card__score">相关度 {{ (src.score * 100).toFixed(0) }}%</span>
+                  </div>
+                  <div class="source-evidence-card__meta">
+                    <span v-if="src?.source">检索来源：{{ normalizeSourceLabel(src.source) }}</span>
+                    <span v-if="src?.chunk_id">片段 #{{ src.chunk_id }}</span>
+                    <span v-if="src?.page != null">页码 {{ src.page }}</span>
+                  </div>
+                  <p v-if="src?.content || src?.text || src?.snippet" class="source-evidence-card__snippet">
+                    {{ src.content || src.text || src.snippet }}
+                  </p>
+                </article>
               </div>
             </transition>
           </div>
@@ -134,7 +145,83 @@
 
 .sources-expand-enter-to,
 .sources-expand-leave-from {
-  max-height: 200px;
+  max-height: 520px;
+}
+
+.msg-sources__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--brand-soft-border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--brand-700);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.msg-sources__chevron {
+  transition: transform 0.2s ease;
+}
+
+.msg-sources__chevron--open {
+  transform: rotate(180deg);
+}
+
+.source-evidence-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.source-evidence-card {
+  padding: 14px 15px;
+  border-radius: 14px;
+  border: 1px solid var(--border-color);
+  background: linear-gradient(180deg, #ffffff, var(--surface-muted));
+  box-shadow: var(--shadow-subtle);
+}
+
+.source-evidence-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.source-evidence-card__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.source-evidence-card__score {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--brand-700);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.source-evidence-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 10px;
+  color: var(--text-4);
+  font-size: 12px;
+}
+
+.source-evidence-card__snippet {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.72;
+  white-space: pre-wrap;
 }
 </style>
 
@@ -249,6 +336,18 @@ const sourcesSummaryLabel = (sources) => {
   return `引用来源（${docCount} 篇文档，共 ${chunkCount} 段）`
 }
 
+const normalizeSourceLabel = (source) => {
+  const v = String(source || '').trim()
+  const map = {
+    naive: '文档检索',
+    vector: '向量检索',
+    bm25: '关键词检索',
+    keyword: '关键词检索',
+    auto: '混合检索'
+  }
+  return map[v] || v || '未知来源'
+}
+
 const getSourceTooltip = (src) => {
   const normalize = (s) => {
     const v = String(s || '').trim()
@@ -258,13 +357,7 @@ const getSourceTooltip = (src) => {
       vector: 'vector',
       bm25: 'bm25',
       keyword: 'bm25',
-      local: 'local',
-      global: 'global',
-      global_local: 'global_local',
-      graph_local: 'local',
-      graph_global: 'global',
-      graph_hybrid: 'global_local',
-      llm_only: 'llm_only'
+      auto: 'auto'
     }
     return map[v] || v
   }
@@ -297,4 +390,3 @@ const formatTime = (isoStr) => {
   return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 </script>
-

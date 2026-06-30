@@ -116,14 +116,19 @@ select {
 }
 
 .n-button {
-  --n-height: 38px;
+  --n-height: 40px;
   --n-border-radius: var(--control-radius);
   --n-font-size: 14px;
+  --n-font-weight: 500;
+}
+
+.n-button--primary-type {
+  --n-text-color: #fff;
 }
 
 .n-input,
 .n-base-selection {
-  --n-height: var(--control-height);
+  --n-height: 42px;
   --n-border-radius: var(--control-radius);
 }
 
@@ -180,8 +185,8 @@ select {
 
 /* ─── 滚动条 ─── */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -195,6 +200,24 @@ select {
 
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ─── 毛玻璃卡片 ─── */
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+}
+
+/* ─── 入场动画 ─── */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.fade-in-up {
+  animation: fade-in-up 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* ─── Focus 样式统一 ─── */

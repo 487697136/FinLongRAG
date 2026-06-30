@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $FrontendRoot = Join-Path $ProjectRoot "frontend"
-function Resolve-CondaExe {
+function Find-CondaExe {
     param([string]$Preferred)
     if ($Preferred -and (Test-Path -LiteralPath $Preferred)) {
         return $Preferred
@@ -34,7 +34,7 @@ function Resolve-CondaExe {
     if ($fromPath) {
         return $fromPath.Source
     }
-    throw "Conda executable not found. Install Anaconda/Miniconda or pass -CondaExe."
+    return $null
 }
 
 function Resolve-EnvRoot {
@@ -45,10 +45,28 @@ function Resolve-EnvRoot {
     return [System.IO.Path]::GetFullPath((Join-Path (Split-Path (Split-Path $CondaExePath -Parent) -Parent) ""))
 }
 
-$CondaExe = Resolve-CondaExe $CondaExe
-$EnvRoot = Resolve-EnvRoot -CondaExePath $CondaExe -Preferred $EnvRoot
-$EnvPrefix = Join-Path (Join-Path $EnvRoot "envs") $EnvName
-$PythonExe = Join-Path $EnvPrefix "python.exe"
+$CondaLauncher = Find-CondaExe $CondaExe
+
+$PythonLauncher = $null
+try {
+    $PythonLauncher = (Get-Command py -ErrorAction Stop).Source
+} catch {
+    try {
+        $PythonLauncher = (Get-Command python -ErrorAction Stop).Source
+    } catch {
+        $PythonLauncher = $null
+    }
+}
+
+$UseConda = [bool]$CondaLauncher
+if ($UseConda) {
+    $EnvRoot = Resolve-EnvRoot -CondaExePath $CondaLauncher -Preferred $EnvRoot
+    $EnvPrefix = Join-Path (Join-Path $EnvRoot "envs") $EnvName
+    $PythonExe = Join-Path $EnvPrefix "python.exe"
+} else {
+    $EnvPrefix = Join-Path $ProjectRoot ".venv"
+    $PythonExe = Join-Path $EnvPrefix "Scripts\python.exe"
+}
 $Url = "http://${HostName}:${Port}"
 
 function Write-Step {
@@ -98,56 +116,76 @@ function Test-PortOpen {
 function Ensure-EnvFile {
     $envPath = Join-Path $ProjectRoot ".env"
     $examplePath = Join-Path $ProjectRoot ".env.example"
-    if (-not (Test-Path -LiteralPath $envPath)) {
-        if (-not (Test-Path -LiteralPath $examplePath)) {
-            throw ".env.example not found."
-        }
-        Copy-Item -LiteralPath $examplePath -Destination $envPath
-        Write-Step "Created .env from .env.example."
+
+    if (Test-Path -LiteralPath $envPath) {
+        return
     }
 
-    $lines = Get-Content -LiteralPath $envPath
+    if (-not (Test-Path -LiteralPath $examplePath)) {
+        throw ".env.example not found."
+    }
+
+    $lines = Get-Content -LiteralPath $examplePath
     $secretLine = $lines | Where-Object { $_ -match '^FINLONGRAG_SECRET_KEY=' } | Select-Object -First 1
     if (-not $secretLine -or $secretLine -match 'change-me') {
         $bytes = New-Object byte[] 48
         $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
         try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
         $secret = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
-        $found = $false
-        $updated = foreach ($line in $lines) {
-            if ($line -match '^FINLONGRAG_SECRET_KEY=') {
-                $found = $true
-                "FINLONGRAG_SECRET_KEY=$secret"
-            } else {
-                $line
-            }
-        }
-        if (-not $found) {
-            $updated += "FINLONGRAG_SECRET_KEY=$secret"
-        }
-        Set-Content -LiteralPath $envPath -Value $updated -Encoding UTF8
-        Write-Step "Generated FINLONGRAG_SECRET_KEY in .env."
+    } else {
+        $secret = $secretLine.Split('=', 2)[1]
     }
+
+    foreach ($line in $lines) {
+        if ($line -notmatch '^\s*([A-Z0-9_]+)=(.*)$') {
+            continue
+        }
+
+        $name = $matches[1]
+        $value = $matches[2]
+        if ($name -eq 'FINLONGRAG_SECRET_KEY') {
+            [System.Environment]::SetEnvironmentVariable($name, $secret, 'Process')
+            continue
+        }
+
+        if ([string]::IsNullOrWhiteSpace([System.Environment]::GetEnvironmentVariable($name, 'Process'))) {
+            [System.Environment]::SetEnvironmentVariable($name, $value, 'Process')
+        }
+    }
+
+    [System.Environment]::SetEnvironmentVariable('FINLONGRAG_SECRET_KEY', $secret, 'Process')
+    Write-Step "Loaded environment variables from .env.example."
 }
 
 function Ensure-PythonEnv {
-    $env:CONDA_ENVS_PATH = Join-Path $EnvRoot "envs"
-    $env:CONDA_PKGS_DIRS = Join-Path $EnvRoot "pkgs"
-    $env:PIP_CACHE_DIR = Join-Path $EnvRoot "pip-cache"
-    $env:PYTHONUSERBASE = Join-Path $EnvRoot "python-user"
-    $env:PYTHONNOUSERSITE = "1"
-    $env:TEMP = Join-Path $EnvRoot "temp"
-    $env:TMP = Join-Path $EnvRoot "temp"
+    if ($UseConda) {
+        $env:CONDA_ENVS_PATH = Join-Path $EnvRoot "envs"
+        $env:CONDA_PKGS_DIRS = Join-Path $EnvRoot "pkgs"
+        $env:PIP_CACHE_DIR = Join-Path $EnvRoot "pip-cache"
+        $env:PYTHONUSERBASE = Join-Path $EnvRoot "python-user"
+        $env:PYTHONNOUSERSITE = "1"
+        $env:TEMP = Join-Path $EnvRoot "temp"
+        $env:TMP = Join-Path $EnvRoot "temp"
 
-    foreach ($path in @($env:CONDA_ENVS_PATH, $env:CONDA_PKGS_DIRS, $env:PIP_CACHE_DIR, $env:PYTHONUSERBASE, $env:TEMP)) {
-        New-Item -ItemType Directory -Force -Path $path | Out-Null
-    }
+        foreach ($path in @($env:CONDA_ENVS_PATH, $env:CONDA_PKGS_DIRS, $env:PIP_CACHE_DIR, $env:PYTHONUSERBASE, $env:TEMP)) {
+            New-Item -ItemType Directory -Force -Path $path | Out-Null
+        }
 
-    if (-not (Test-Path -LiteralPath $PythonExe)) {
-        Write-Step "Python environment not found. Running scripts\setup_env.ps1 -SkipTests..."
-        & (Join-Path $PSScriptRoot "setup_env.ps1") -CondaExe $CondaExe -EnvRoot $EnvRoot -EnvName $EnvName -SkipTests
-        if ($LASTEXITCODE -ne 0) {
-            throw "Environment setup failed."
+        if (-not (Test-Path -LiteralPath $PythonExe)) {
+            Write-Step "Python environment not found. Running scripts\setup_env.ps1 -SkipTests..."
+            & (Join-Path $PSScriptRoot "setup_env.ps1") -CondaExe $CondaLauncher -EnvRoot $EnvRoot -EnvName $EnvName -SkipTests
+            if ($LASTEXITCODE -ne 0) {
+                throw "Environment setup failed."
+            }
+        }
+    } else {
+        if (-not $PythonLauncher) {
+            throw "No usable Python launcher found. Install Python 3.12 or Conda, then try again."
+        }
+
+        if (-not (Test-Path -LiteralPath $PythonExe)) {
+            Write-Step "Python virtual environment not found. Creating .venv with Python 3.12..."
+            Invoke-Native $PythonLauncher @("-3.12", "-m", "venv", $EnvPrefix) "python venv"
         }
     }
 

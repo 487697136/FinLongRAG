@@ -28,7 +28,7 @@ import {
 } from 'naive-ui'
 import { getNaiveThemeOverrides } from '@/theme/naiveTheme'
 
-const THEME_STORAGE_KEY = 'amsrag-theme'
+const THEME_STORAGE_KEY = 'finlongrag-theme'
 const darkMode = ref(false)
 
 const applyTheme = (isDark) => {
@@ -53,6 +53,14 @@ provide('themePreference', {
 onMounted(() => {
   if (typeof window === 'undefined') {
     return
+  }
+
+  // 迁移旧版 localStorage key
+  const oldKey = 'amsrag-theme'
+  const stored = window.localStorage.getItem(oldKey)
+  if (stored !== null && window.localStorage.getItem(THEME_STORAGE_KEY) === null) {
+    window.localStorage.setItem(THEME_STORAGE_KEY, stored)
+    window.localStorage.removeItem(oldKey)
   }
 
   darkMode.value = window.localStorage.getItem(THEME_STORAGE_KEY) === 'dark'

@@ -59,9 +59,9 @@ export function getNaiveThemeOverrides(isDark) {
     },
     /* Select 内部选择框由 base.css 中 .n-base-selection 的 CSS 变量统一控制 */
     Card: {
-      borderRadius: RADIUS.md,
-      paddingMedium: '20px 22px',
-      titleFontSize: '16px',
+      borderRadius: RADIUS.lg,
+      paddingMedium: '24px 28px',
+      titleFontSize: '17px',
       titleFontWeight: '600'
     },
     Drawer: {
@@ -79,7 +79,7 @@ export function getNaiveThemeOverrides(isDark) {
       fontSizeMedium: '12px'
     },
     Tabs: {
-      tabBorderRadius: RADIUS.sm,
+      tabBorderRadius: RADIUS.md,
       tabFontWeight: '500',
       tabFontWeightActive: '600',
       tabGapMediumLine: '20px'

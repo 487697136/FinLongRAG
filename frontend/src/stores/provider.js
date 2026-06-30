@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { listApiKeys, listProviders } from '@/api/zhiyuan'
+import { listApiKeys, listProviders } from '@/api/api'
 
 const CACHE_TTL = 60_000 // 1 分钟内不重复请求
 

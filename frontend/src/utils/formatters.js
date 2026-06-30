@@ -75,3 +75,36 @@ export function statusLabelFromKnowledgeBase(item) {
   if (item.document_count > 0) return '待构建'
   return '空知识库'
 }
+
+/* ─── 评测相关 ─── */
+export function evalStatusType(status) {
+  if (status === 'done') return 'success'
+  if (status === 'failed') return 'error'
+  if (status === 'running') return 'info'
+  return 'default'
+}
+
+export function evalStatusLabel(status) {
+  const map = { running: '运行中', done: '已完成', failed: '失败' }
+  return map[status] || status || '-'
+}
+
+export function evalStrategyLabel(strategy) {
+  const map = { hybrid: '混合检索', bm25: 'BM25F', vector: '向量检索' }
+  return map[strategy] || strategy || '-'
+}
+
+export function evalFormatPercent(value) {
+  if (typeof value !== 'number') return '-'
+  return `${(value * 100).toFixed(1)}%`
+}
+
+export function evalFormatNumber(value) {
+  if (typeof value !== 'number') return '-'
+  return value.toFixed(4)
+}
+
+export function evalFormatDate(value) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString('zh-CN')
+}
