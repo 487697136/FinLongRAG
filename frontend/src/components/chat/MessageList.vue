@@ -23,13 +23,21 @@
           <div class="msg-ai-bubble" :class="{ 'msg-ai-bubble--streaming': turn.streaming }">
             <!-- 流式阶段：pre 展示，保留原始格式，有打字光标 -->
             <template v-if="turn.streaming">
-              <pre v-if="turn.answer" class="msg-ai-streaming">{{ turn.answer }}</pre>
-              <div v-else class="thinking-indicator">
+              <div v-if="turn.streamStatus && !turn.answer" class="stream-status">
+                <span class="stream-status__dots">
+                  <span class="thinking-dot" />
+                  <span class="thinking-dot" />
+                  <span class="thinking-dot" />
+                </span>
+                <span class="stream-status__label">{{ streamStatusLabel(turn.streamStatus) }}</span>
+              </div>
+              <div v-else-if="!turn.answer" class="thinking-indicator">
                 <span class="thinking-dot" />
                 <span class="thinking-dot" />
                 <span class="thinking-dot" />
               </div>
-              <span class="typing-caret" />
+              <pre v-if="turn.answer" class="msg-ai-streaming">{{ turn.answer }}</pre>
+              <span v-if="turn.answer || !turn.streamStatus" class="typing-caret" />
             </template>
 
             <!-- 完成后：Markdown 渲染 -->
@@ -62,7 +70,7 @@
               @click="toggleSources(turn.id)"
             >
               <slot name="source-icon" />
-              <span>引用来源（{{ turn.sources.length }}）</span>
+              <span>{{ sourcesSummaryLabel(turn.sources) }}</span>
               <svg
                 class="msg-sources__chevron"
                 :class="{ 'msg-sources__chevron--open': sourcesOpenMap[turn.id] }"
@@ -75,12 +83,12 @@
             <transition name="sources-expand">
               <div v-if="sourcesOpenMap[turn.id]" class="source-chips">
                 <span
-                  v-for="(src, idx) in turn.sources"
-                  :key="idx"
+                  v-for="(src, idx) in deduplicateSources(turn.sources)"
+                  :key="src._dedupeKey"
                   class="source-chip"
-                  :title="getSourceTooltip(src)"
+                  :title="src._tooltip"
                 >
-                  {{ getSourceTitle(src, idx) }}
+                  {{ src._label }}
                 </span>
               </div>
             </transition>
@@ -164,6 +172,81 @@ const copyAnswer = async (turn) => {
 
 const toggleSources = (turnId) => {
   sourcesOpenMap[turnId] = !sourcesOpenMap[turnId]
+}
+
+const STREAM_STATUS_LABELS = {
+  retrieving: '检索知识库中…',
+  verifying: '核验选项中…',
+  generating: '生成回答中…'
+}
+
+const streamStatusLabel = (status) => STREAM_STATUS_LABELS[status] || '处理中…'
+
+/**
+ * Group raw evidence chunks by document, returning one entry per unique document.
+ * Each returned object has: _dedupeKey, _label, _tooltip, _chunkCount.
+ */
+const deduplicateSources = (sources) => {
+  if (!sources?.length) return []
+  const docMap = new Map()
+
+  sources.forEach((src, idx) => {
+    // Derive a stable document key from doc_id > title > source > fallback index
+    const docKey = String(src?.doc_id || src?.title || src?.name || src?.source || idx)
+    // Human-readable label for the document
+    const label = src?.title || src?.name || src?.doc_id || src?.source || `来源 ${idx + 1}`
+
+    // page can be top-level or inside metadata
+    const page = src?.page ?? src?.metadata?.page ?? null
+
+    if (!docMap.has(docKey)) {
+      docMap.set(docKey, {
+        _dedupeKey: docKey,
+        _label: label,
+        _chunkCount: 1,
+        _pages: page != null ? [page] : [],
+        _bestScore: src?.score ?? 0,
+        _raw: src,
+      })
+    } else {
+      const entry = docMap.get(docKey)
+      entry._chunkCount += 1
+      if (page != null && !entry._pages.includes(page)) {
+        entry._pages.push(page)
+      }
+      if ((src?.score ?? 0) > entry._bestScore) entry._bestScore = src.score
+    }
+  })
+
+  // Build tooltip and finalize labels
+  return Array.from(docMap.values()).map((entry) => {
+    const parts = [entry._label]
+    if (entry._chunkCount > 1) parts.push(`${entry._chunkCount} 段`)
+    if (entry._pages.length) {
+      const sorted = [...entry._pages].sort((a, b) => a - b)
+      const pagesStr = sorted.length > 3
+        ? `第 ${sorted[0]}–${sorted[sorted.length - 1]} 页`
+        : `第 ${sorted.join('、')} 页`
+      parts.push(pagesStr)
+    }
+    if (entry._bestScore > 0) parts.push(`相关度: ${(entry._bestScore * 100).toFixed(0)}%`)
+    return { ...entry, _tooltip: parts.join(' | ') }
+  })
+}
+
+/**
+ * Summary label for the sources toggle button.
+ * e.g. "引用来源（2 篇文档，共 8 段）" or "引用来源（1 篇文档）"
+ */
+const sourcesSummaryLabel = (sources) => {
+  if (!sources?.length) return '引用来源'
+  const deduped = deduplicateSources(sources)
+  const docCount = deduped.length
+  const chunkCount = sources.length
+  if (docCount === chunkCount) {
+    return `引用来源（${docCount}）`
+  }
+  return `引用来源（${docCount} 篇文档，共 ${chunkCount} 段）`
 }
 
 const getSourceTooltip = (src) => {

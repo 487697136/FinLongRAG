@@ -1,6 +1,6 @@
 param(
-    [string]$CondaExe = "E:\Anaconda3\Scripts\conda.exe",
-    [string]$EnvRoot = "E:\Anaconda3",
+    [string]$CondaExe = "D:\Anaconda3\Scripts\conda.exe",
+    [string]$EnvRoot = "D:\Anaconda3",
     [string]$EnvName = "finlongrag-py312",
     [switch]$SkipTests
 )

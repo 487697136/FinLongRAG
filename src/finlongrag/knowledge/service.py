@@ -14,9 +14,9 @@ from finlongrag.core.io import write_jsonl
 from finlongrag.core.schema import Chunk, Document
 from finlongrag.index.bm25 import BM25FIndex
 from finlongrag.index.document import DocumentIndex
-from finlongrag.index.faiss_store import build_faiss_embeddings
-from finlongrag.ingestion.chunker import chunk_document
-from finlongrag.ingestion.parser import parse_document
+from finlongrag.index.merge import merge_global_indexes
+from finlongrag.index.faiss_store import append_faiss_embeddings, build_faiss_embeddings, faiss_index_exists
+from finlongrag.ingestion.pipeline import IngestionPipeline
 from finlongrag.storage.knowledge_repository import (
     IndexVersionRecord,
     IngestionTaskRecord,
@@ -49,10 +49,18 @@ class KnowledgeService:
         name: str,
         description: str = "",
         metadata: dict[str, Any] | None = None,
+        created_by: str | None = None,
     ) -> KnowledgeBaseRecord:
         if not name.strip():
             raise ValueError("knowledge base name is required")
-        return self.repository.create_knowledge_base(name=name, description=description, metadata=metadata)
+        resolved_metadata = metadata or {}
+        resolved_created_by = created_by or resolved_metadata.get("owner_id")
+        return self.repository.create_knowledge_base(
+            name=name,
+            description=description,
+            metadata=resolved_metadata,
+            created_by=resolved_created_by,
+        )
 
     def list_knowledge_bases(self, *, limit: int = 100, user_id: str | None = None) -> list[KnowledgeBaseRecord]:
         return self.repository.list_knowledge_bases(limit=limit, user_id=user_id)
@@ -90,12 +98,18 @@ class KnowledgeService:
             "file_size": resolved_path.stat().st_size,
             **(metadata or {}),
         }
+        # Store path relative to object_storage_root when possible so the record
+        # remains valid if the project root is moved to a different directory.
+        try:
+            stored_path = str(resolved_path.relative_to(self.settings.object_storage_root))
+        except ValueError:
+            stored_path = str(resolved_path)
         return self.repository.register_document(
             kb_id=kb_id,
             doc_id=inferred_doc_id,
             domain=inferred_domain,
             title=inferred_title,
-            path=str(resolved_path),
+            path=stored_path,
             source_type="local_file",
             content_hash=_sha256_file(resolved_path),
             metadata=document_metadata,
@@ -114,31 +128,61 @@ class KnowledgeService:
         status: str = "queued",
         stage: str = "queued",
         metadata: dict[str, Any] | None = None,
+        document_ids: list[str] | None = None,
+        force: bool = False,
     ) -> IngestionTaskRecord:
         self.get_knowledge_base(kb_id)
         documents = self.repository.list_documents(kb_id, limit=10000)
+        if document_ids:
+            doc_id_set = set(document_ids)
+            documents = [doc for doc in documents if doc.document_id in doc_id_set]
+        elif not force:
+            documents = [doc for doc in documents if self._document_needs_ingestion(doc)]
         return self.repository.create_task(
             kb_id=kb_id,
             total_documents=len(documents),
             status=status,
             stage=stage,
-            metadata={"build_index": build_index, **(metadata or {})},
+            metadata={
+                "build_index": build_index,
+                "document_ids": document_ids or [],
+                "force": force,
+                **(metadata or {}),
+            },
         )
 
-    def ingest_knowledge_base(self, kb_id: str, *, build_index: bool = True) -> IngestionTaskRecord:
+    def ingest_knowledge_base(
+        self,
+        kb_id: str,
+        *,
+        build_index: bool = True,
+        force: bool = False,
+    ) -> IngestionTaskRecord:
         task = self.create_ingestion_task(
             kb_id,
             build_index=build_index,
             status="running",
             stage="created",
             metadata={"execution_mode": "sync"},
+            force=force,
         )
         return self.run_ingestion_task(task.task_id)
 
     def run_ingestion_task(self, task_id: str, *, raise_on_error: bool = True) -> IngestionTaskRecord:
         task = self.get_task(task_id)
         build_index = bool(task.metadata.get("build_index", True))
-        documents = self.repository.list_documents(task.kb_id, limit=10000)
+        force = bool(task.metadata.get("force", False))
+        document_ids_filter = [str(doc_id) for doc_id in (task.metadata.get("document_ids") or []) if doc_id]
+
+        all_documents = self.repository.list_documents(task.kb_id, limit=10000)
+        if document_ids_filter:
+            doc_id_set = set(document_ids_filter)
+            documents = [doc for doc in all_documents if doc.document_id in doc_id_set]
+        elif force:
+            documents = list(all_documents)
+        else:
+            documents = [doc for doc in all_documents if self._document_needs_ingestion(doc)]
+
         task = self.repository.update_task(
             task.task_id,
             status="running",
@@ -146,9 +190,13 @@ class KnowledgeService:
             processed_documents=0,
             total_chunks=0,
             error="",
-            metadata={"build_index": build_index},
+            metadata={
+                "build_index": build_index,
+                "document_ids": document_ids_filter,
+                "force": force,
+            },
         )
-        if not documents:
+        if not all_documents:
             return self.repository.update_task(
                 task.task_id,
                 status="failed",
@@ -158,57 +206,124 @@ class KnowledgeService:
             )
 
         processed_documents = 0
+        skipped_documents = 0
         total_chunks = 0
+        newly_processed_doc_ids: list[str] = []
+        reprocessed_doc_ids: list[str] = []
         current_document: KnowledgeDocumentRecord | None = None
         try:
             for document_record in documents:
                 current_document = document_record
+                was_already_indexed = document_record.status in {"indexed", "chunked"}
+                if not force and not self._document_needs_ingestion(document_record):
+                    skipped_documents += 1
+                    self.repository.update_task(
+                        task.task_id,
+                        stage=f"skip_unchanged:{document_record.doc_id}"[:120],
+                        processed_documents=processed_documents,
+                        total_chunks=total_chunks,
+                    )
+                    continue
+
                 self.repository.update_task(
                     task.task_id,
-                    stage=f"parse:{document_record.doc_id}",
+                    stage=f"parse:{document_record.doc_id}"[:120],
                     processed_documents=processed_documents,
                     total_chunks=total_chunks,
                 )
+                # Resolve path: support both new relative (to object_storage_root) and legacy absolute paths.
+                resolved_doc_path = self._resolve_document_path(document_record.path)
+                if not resolved_doc_path.exists():
+                    self.repository.update_document_state(
+                        document_record.document_id,
+                        status="failed",
+                        error=f"file_missing: {document_record.path}",
+                    )
+                    self.repository.update_task(
+                        task.task_id,
+                        stage=f"skip_missing:{document_record.doc_id}"[:120],
+                        processed_documents=processed_documents,
+                        total_chunks=total_chunks,
+                    )
+                    continue
                 self.repository.update_document_state(document_record.document_id, status="parsing", error="")
-                parsed, pages = parse_document(_document_from_record(document_record))
+                doc_for_parse = _document_from_record(document_record)
+                doc_for_parse = replace(doc_for_parse, path=str(resolved_doc_path))
+                pipeline = IngestionPipeline(self.settings)
+                ingestion_ctx = pipeline.run(
+                    kb_id=task.kb_id,
+                    document_id=document_record.document_id,
+                    document=doc_for_parse,
+                )
+                if ingestion_ctx.error:
+                    raise RuntimeError(ingestion_ctx.error)
                 chunks = _scope_chunks(
                     kb_id=task.kb_id,
                     document_id=document_record.document_id,
-                    chunks=chunk_document(parsed, pages),
+                    chunks=ingestion_ctx.chunks,
                 )
                 self.repository.replace_document_chunks(task.kb_id, document_record.document_id, chunks)
                 processed_documents += 1
                 total_chunks += len(chunks)
+                if was_already_indexed:
+                    reprocessed_doc_ids.append(document_record.document_id)
+                else:
+                    newly_processed_doc_ids.append(document_record.document_id)
                 self.repository.update_document_state(
                     document_record.document_id,
                     status="chunked",
-                    page_count=len(pages),
+                    page_count=len(ingestion_ctx.pages),
                     chunk_count=len(chunks),
                     error="",
                     metadata={
-                        "parser": parsed.metadata.get("parser", ""),
-                        "page_count": len(pages),
+                        "parser": (ingestion_ctx.parsed_document.metadata.get("parser", "") if ingestion_ctx.parsed_document else ""),
+                        "page_count": len(ingestion_ctx.pages),
+                        "ingestion_stages": ingestion_ctx.stage_reports,
                         "last_ingestion_task_id": task.task_id,
                     },
                 )
                 self.repository.update_task(
                     task.task_id,
-                    stage=f"chunked:{document_record.doc_id}",
+                    stage=f"chunked:{document_record.doc_id}"[:120],
                     processed_documents=processed_documents,
                     total_chunks=total_chunks,
                 )
 
             index_info: dict[str, Any] = {}
-            if build_index:
+            should_build_index = build_index and (
+                processed_documents > 0
+                or skipped_documents > 0
+                or self.get_active_index_version(kb_id=task.kb_id) is None
+            )
+            if should_build_index:
                 self.repository.update_task(
                     task.task_id,
                     stage="build_index",
                     processed_documents=processed_documents,
                     total_chunks=total_chunks,
                 )
-                index_info = self.build_indexes(kb_id=task.kb_id)
-                for document_record in documents:
-                    self.repository.update_document_state(document_record.document_id, status="indexed")
+                index_info = self.build_indexes(
+                    kb_id=task.kb_id,
+                    incremental_document_ids=newly_processed_doc_ids,
+                    force_vector_rebuild=bool(reprocessed_doc_ids) or force,
+                )
+                for document_record in all_documents:
+                    if document_record.status in {"chunked", "indexed"} or document_record.document_id in {
+                        *newly_processed_doc_ids,
+                        *reprocessed_doc_ids,
+                    }:
+                        self.repository.update_document_state(document_record.document_id, status="indexed")
+
+            if processed_documents == 0 and skipped_documents == 0 and not should_build_index:
+                return self.repository.update_task(
+                    task.task_id,
+                    status="succeeded",
+                    stage="nothing_to_do",
+                    processed_documents=0,
+                    total_chunks=0,
+                    finished=True,
+                    metadata={"skipped": True},
+                )
 
             return self.repository.update_task(
                 task.task_id,
@@ -217,7 +332,12 @@ class KnowledgeService:
                 processed_documents=processed_documents,
                 total_chunks=total_chunks,
                 finished=True,
-                metadata={"index": index_info},
+                metadata={
+                    "index": index_info,
+                    "skipped_documents": skipped_documents,
+                    "newly_processed_document_ids": newly_processed_doc_ids,
+                    "reprocessed_document_ids": reprocessed_doc_ids,
+                },
             )
         except Exception as exc:
             self.repository.update_task(
@@ -242,7 +362,13 @@ class KnowledgeService:
                 raise RuntimeError(f"failed to load failed ingestion task: {task.task_id}") from exc
             return failed
 
-    def build_indexes(self, *, kb_id: str | None = None) -> dict[str, Any]:
+    def build_indexes(
+        self,
+        *,
+        kb_id: str | None = None,
+        incremental_document_ids: list[str] | None = None,
+        force_vector_rebuild: bool = False,
+    ) -> dict[str, Any]:
         if not kb_id:
             raise ValueError("kb_id is required for managed index building")
         self.get_knowledge_base(kb_id)
@@ -258,7 +384,29 @@ class KnowledgeService:
         document_index = DocumentIndex.build(chunks, tokenizer_mode=self.settings.tokenizer_mode)
         chunk_index.save(chunk_index_path)
         document_index.save(doc_index_path)
-        vector_info: dict[str, Any] = {"enabled": True, **build_faiss_embeddings(self.settings, kb_id=kb_id, chunks=chunks)}
+
+        incremental_doc_id_set = {doc_id for doc_id in (incremental_document_ids or []) if doc_id}
+        can_incremental_vector = (
+            bool(incremental_doc_id_set)
+            and not force_vector_rebuild
+            and faiss_index_exists(self.settings, kb_id=kb_id)
+        )
+        if can_incremental_vector:
+            new_chunks = [
+                chunk for chunk in chunks if str(chunk.metadata.get("document_id") or "") in incremental_doc_id_set
+            ]
+            vector_info = {
+                "enabled": True,
+                "mode": "incremental",
+                **append_faiss_embeddings(self.settings, kb_id=kb_id, new_chunks=new_chunks),
+            }
+        else:
+            vector_info = {
+                "enabled": True,
+                "mode": "full",
+                **build_faiss_embeddings(self.settings, kb_id=kb_id, chunks=chunks),
+            }
+
         self._publish_compatibility_indexes(chunk_index_path, doc_index_path)
         self._write_processed_snapshot(chunks)
         version = self.repository.create_index_version(
@@ -273,9 +421,12 @@ class KnowledgeService:
                 "compatibility_chunk_index_path": str(self.settings.index_dir / "bm25_index.pkl"),
                 "compatibility_document_index_path": str(self.settings.index_dir / "document_index.pkl"),
                 "vector": vector_info,
+                "incremental_document_ids": list(incremental_doc_id_set),
+                "force_vector_rebuild": force_vector_rebuild,
             },
         )
         active_version = self.repository.activate_index_version(version.index_version_id)
+        global_merge = merge_global_indexes(self.settings, self.repository)
         return {
             "kb_id": kb_id,
             "index_version_id": active_version.index_version_id,
@@ -286,6 +437,7 @@ class KnowledgeService:
             "document_index_path": str(doc_index_path),
             "tokenizer_mode": self.settings.tokenizer_mode,
             "vector": vector_info,
+            "global_merge": global_merge,
         }
 
     def list_index_versions(self, kb_id: str | None = None, *, limit: int = 100) -> list[IndexVersionRecord]:
@@ -295,6 +447,10 @@ class KnowledgeService:
 
     def get_active_index_version(self, kb_id: str | None = None) -> IndexVersionRecord | None:
         return self.repository.get_active_index_version(kb_id=kb_id)
+
+    def refresh_global_indexes(self) -> dict[str, Any]:
+        """Rebuild or clear merged global BM25 / document indexes."""
+        return merge_global_indexes(self.settings, self.repository)
 
     def activate_index_version(self, index_version_id: str) -> IndexVersionRecord:
         version = self.repository.get_index_version(index_version_id)
@@ -320,11 +476,57 @@ class KnowledgeService:
             raise KeyError(f"ingestion task not found: {task_id}")
         return record
 
+    def _document_needs_ingestion(self, record: KnowledgeDocumentRecord, *, force: bool = False) -> bool:
+        """Return True when a document should be parsed/chunked again."""
+        if force:
+            return True
+        if record.status in {"registered", "failed"}:
+            return True
+        if record.status in {"indexed", "chunked"}:
+            resolved = self._resolve_document_path(record.path)
+            if not resolved.exists():
+                self.repository.update_document_state(
+                    record.document_id,
+                    status="failed",
+                    error=f"source file missing: {resolved}",
+                )
+                return False
+            if not record.content_hash:
+                return False
+            return _sha256_file(resolved) != record.content_hash
+        return True
+
     def _resolve_local_path(self, path: str | Path) -> Path:
         candidate = Path(path).expanduser()
         if not candidate.is_absolute():
             candidate = self.settings.project_root / candidate
         return candidate.resolve()
+
+    def _resolve_document_path(self, stored_path: str) -> Path:
+        """Resolve a stored document path to an absolute path.
+
+        Supports two formats:
+        - Absolute path (legacy): used as-is.
+        - Relative path (new): resolved against object_storage_root so the
+          database remains valid across project moves / re-installs.
+        """
+        p = Path(stored_path)
+        if p.is_absolute():
+            if p.exists():
+                return p
+            # Legacy absolute path from old install — try to remap to current
+            # object_storage_root by preserving the relative portion after "uploads/".
+            try:
+                # Find "uploads" segment and keep everything after it.
+                parts = p.parts
+                uploads_idx = next(i for i, part in enumerate(parts) if part.lower() == "uploads")
+                rel = Path(*parts[uploads_idx:])
+                remapped = self.settings.object_storage_root / rel
+                return remapped
+            except (StopIteration, TypeError):
+                return p
+        # Relative path: resolve against object_storage_root.
+        return (self.settings.object_storage_root / p).resolve()
 
     def _write_processed_snapshot(self, chunks: list[Chunk]) -> None:
         documents: dict[str, Document] = {}

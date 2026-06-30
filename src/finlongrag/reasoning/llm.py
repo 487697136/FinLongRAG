@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -11,6 +13,25 @@ import requests
 
 from finlongrag.core.config import Settings, get_api_key
 from finlongrag.core.schema import TokenUsage
+
+_request_llm_model: ContextVar[str | None] = ContextVar("request_llm_model", default=None)
+
+
+@contextmanager
+def llm_model_scope(model: str | None):
+    """Temporarily override the chat model for the current request."""
+    if not model:
+        yield
+        return
+    token = _request_llm_model.set(model)
+    try:
+        yield
+    finally:
+        _request_llm_model.reset(token)
+
+
+def resolve_chat_model(settings: Settings, explicit: str | None = None) -> str:
+    return explicit or _request_llm_model.get() or settings.qwen_model
 
 
 @dataclass
@@ -41,9 +62,14 @@ class QwenChatModel:
     def __init__(self, settings: Settings, *, dry_run: bool = False) -> None:
         self.settings = settings
         self.dry_run = dry_run
-        self.api_key = get_api_key()
-        if not dry_run and not self.api_key:
+        if not dry_run and not get_api_key():
             raise RuntimeError("Missing API key. Set DASHSCOPE_API_KEY or use dry_run=True.")
+
+    def _api_key(self) -> str:
+        key = get_api_key()
+        if not key and not self.dry_run:
+            raise RuntimeError("Missing API key. Set DASHSCOPE_API_KEY or use dry_run=True.")
+        return key or ""
 
     def chat(
         self,
@@ -59,7 +85,7 @@ class QwenChatModel:
 
         url = self.settings.qwen_base_url.rstrip("/") + "/chat/completions"
         payload = {
-            "model": self.settings.qwen_model,
+            "model": resolve_chat_model(self.settings),
             "messages": messages,
             "temperature": self.settings.temperature if temperature is None else temperature,
             "max_tokens": max_tokens or self.settings.answer_max_tokens,
@@ -69,7 +95,7 @@ class QwenChatModel:
             try:
                 response = requests.post(
                     url,
-                    headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                    headers={"Authorization": f"Bearer {self._api_key()}", "Content-Type": "application/json"},
                     json=payload,
                     timeout=self.settings.request_timeout_seconds,
                 )
@@ -111,7 +137,7 @@ class QwenChatModel:
 
         url = self.settings.qwen_base_url.rstrip("/") + "/chat/completions"
         payload = {
-            "model": self.settings.qwen_model,
+            "model": resolve_chat_model(self.settings),
             "messages": messages,
             "temperature": self.settings.temperature if temperature is None else temperature,
             "max_tokens": max_tokens or self.settings.answer_max_tokens,
@@ -121,7 +147,7 @@ class QwenChatModel:
         try:
             response = requests.post(
                 url,
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                headers={"Authorization": f"Bearer {self._api_key()}", "Content-Type": "application/json"},
                 json=payload,
                 timeout=self.settings.request_timeout_seconds,
                 stream=True,  # Enable streaming response

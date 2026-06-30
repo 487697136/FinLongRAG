@@ -1,4 +1,4 @@
-"""Structure-aware chunking for financial long documents."""
+"""Structure-aware chunking for long documents."""
 
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ NUMBER_RE = re.compile(r"[-+]?(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?\s*(?:%|�
 DATE_RE = re.compile(r"(?:19|20)\d{2}\s*年(?:\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?)?")
 CLAUSE_RE = re.compile(r"^(第[一二三四五六七八九十百千万0-9]+[章节条款])")
 HEADING_RE = re.compile(
-    r"^(?:第[一二三四五六七八九十百千万0-9]+[章节]|"
+    r"^(?:#{1,6}\s+|"
+    r"第[一二三四五六七八九十百千万0-9]+[章节]|"
     r"[一二三四五六七八九十百]+[、．.]|"
     r"[（(][一二三四五六七八九十0-9]+[)）]|"
     r"\d{1,2}(?:\.\d{1,2}){0,4}\s+)"
@@ -22,16 +23,64 @@ TABLE_HINT_RE = re.compile(r"\||\t| {2,}")
 
 @dataclass(frozen=True)
 class ChunkingConfig:
-    target_chars: int = 420
-    max_chars: int = 720
-    min_chars: int = 48
+    target_chars: int = 512
+    max_chars: int = 1024
+    min_chars: int = 80
+    overlap_chars: int = 80
 
 
 def chunk_document(document: Document, pages: list[PageText], config: ChunkingConfig | None = None) -> list[Chunk]:
+    """Chunk a document across all pages with shared section context and overlap."""
     config = config or ChunkingConfig()
+    if not pages:
+        return []
+
     output: list[Chunk] = []
+    buffer: list[str] = []
+    buffer_chars = 0
+    active_section = ""
+    active_clause = ""
+    active_page = pages[0].page
+
+    def flush() -> None:
+        nonlocal buffer, buffer_chars
+        body = _normalize("".join(buffer))
+        if not body:
+            buffer = []
+            buffer_chars = 0
+            return
+
+        parts = _split_long_text(body, config.max_chars)
+        for part in parts:
+            if len(part) < config.min_chars and not _high_signal_short(part):
+                continue
+            output.append(
+                _make_chunk(document, active_page, active_section, active_clause, part, len(output))
+            )
+
+        if config.overlap_chars > 0 and body:
+            overlap = body[-config.overlap_chars :]
+            buffer = [overlap]
+            buffer_chars = len(overlap)
+        else:
+            buffer = []
+            buffer_chars = 0
+
     for page in pages:
-        output.extend(_chunk_page(document, page, config, start_index=len(output)))
+        for unit_text, section, clause, boundary in _logical_units(page.text):
+            if boundary:
+                flush()
+                active_section = section or active_section
+                active_clause = clause or active_clause
+                active_page = page.page
+            unit_len = len(unit_text)
+            if buffer and buffer_chars + unit_len > config.max_chars:
+                flush()
+            buffer.append(unit_text)
+            buffer_chars += unit_len
+            if buffer_chars >= config.target_chars:
+                flush()
+    flush()
     return output
 
 
@@ -41,39 +90,6 @@ def extract_numbers(text: str) -> list[str]:
 
 def extract_dates(text: str) -> list[str]:
     return list(dict.fromkeys(match.group(0).strip() for match in DATE_RE.finditer(text or "") if match.group(0).strip()))
-
-
-def _chunk_page(document: Document, page: PageText, config: ChunkingConfig, start_index: int) -> list[Chunk]:
-    units = _logical_units(page.text)
-    output: list[Chunk] = []
-    buffer: list[str] = []
-    active_section = ""
-    active_clause = ""
-
-    def flush() -> None:
-        nonlocal buffer
-        body = _normalize("".join(buffer))
-        buffer = []
-        if not body:
-            return
-        for part in _split_long_text(body, config.max_chars):
-            if len(part) < config.min_chars and not _high_signal_short(part):
-                continue
-            output.append(_make_chunk(document, page.page, active_section, active_clause, part, start_index + len(output)))
-
-    for unit_text, section, clause, boundary in units:
-        if boundary:
-            flush()
-            active_section = section or active_section
-            active_clause = clause or active_clause
-        candidate = _normalize("".join([*buffer, unit_text]))
-        if buffer and len(candidate) > config.max_chars:
-            flush()
-        buffer.append(unit_text)
-        if len(_normalize("".join(buffer))) >= config.target_chars:
-            flush()
-    flush()
-    return output
 
 
 def _logical_units(text: str) -> list[tuple[str, str, str, bool]]:
@@ -93,7 +109,13 @@ def _logical_units(text: str) -> list[tuple[str, str, str, bool]]:
         if not line or _noise_line(line):
             continue
         clause_match = CLAUSE_RE.match(line)
+        markdown_heading = re.match(r"^(#{1,6})\s+(.+)", line)
         is_heading = bool(HEADING_RE.match(line)) and len(line) <= 120
+        if markdown_heading:
+            flush_pending()
+            section = markdown_heading.group(2).strip()
+            units.append((line + "\n", section, clause, True))
+            continue
         if clause_match or is_heading:
             flush_pending()
             if is_heading:
@@ -141,6 +163,8 @@ def _make_chunk(document: Document, page: int, section: str, clause: str, text: 
     numbers = extract_numbers(text)
     dates = extract_dates(text)
     chunk_type = "table_row" if _looks_like_table_row(text) else "atomic_text"
+    context_prefix = " > ".join(part for part in (section, clause) if part)
+    display_text = f"[{context_prefix}]\n{text}" if context_prefix else text
     return Chunk(
         chunk_id=f"{document.doc_id}:p{page}:c{index}:{digest}",
         doc_id=document.doc_id,
@@ -148,7 +172,7 @@ def _make_chunk(document: Document, page: int, section: str, clause: str, text: 
         page=page,
         section=section,
         clause_id=clause,
-        text=text,
+        text=display_text,
         numbers=numbers,
         dates=dates,
         tables=[text] if chunk_type == "table_row" else [],
@@ -156,17 +180,14 @@ def _make_chunk(document: Document, page: int, section: str, clause: str, text: 
             "title": document.title,
             "path": document.path,
             "chunk_type": chunk_type,
-            "extra_index_fields": _extra_index_fields(section, clause, numbers, dates, text),
+            "context_prefix": context_prefix,
+            "extra_index_fields": _extra_index_fields(section, clause, numbers, dates),
         },
     )
 
 
-def _extra_index_fields(section: str, clause: str, numbers: list[str], dates: list[str], text: str) -> list[str]:
-    fields = [section, clause, *numbers, *dates]
-    for term in ("营业收入", "净利润", "现金流", "研发投入", "分红", "保险金", "罚款", "期限", "票面利率"):
-        if term in text:
-            fields.append(term)
-    return [field for field in fields if field]
+def _extra_index_fields(section: str, clause: str, numbers: list[str], dates: list[str]) -> list[str]:
+    return [field for field in [section, clause, *numbers, *dates] if field]
 
 
 def _normalize(text: str) -> str:
@@ -186,5 +207,4 @@ def _looks_like_table_row(line: str) -> bool:
 
 
 def _high_signal_short(text: str) -> bool:
-    return bool(extract_numbers(text) or CLAUSE_RE.match(text) or any(term in text for term in ("应当", "不得", "保险金", "净利润")))
-
+    return bool(extract_numbers(text) or CLAUSE_RE.match(text) or len(text) >= 40)

@@ -25,6 +25,33 @@ class DashScopeRerankError(RuntimeError):
     """Raised when DashScope rerank fails."""
 
 
+def should_rerank(
+    candidates: list[RetrievalResult],
+    *,
+    threshold: float = 0.15,
+    min_candidates: int = 5,
+) -> tuple[bool, dict[str, float | int | str]]:
+    """Return whether cross-encoder rerank is worth the API cost."""
+    if len(candidates) < min_candidates:
+        return False, {"reason": "too_few_candidates", "candidate_count": len(candidates)}
+
+    ordered = sorted(candidates, key=lambda item: item.score, reverse=True)
+    top1 = float(ordered[0].score)
+    top5 = float(ordered[4].score)
+    if top1 <= 0:
+        return False, {"reason": "non_positive_top_score", "top1": top1, "top5": top5}
+
+    gap_ratio = (top1 - top5) / top1
+    should = gap_ratio < threshold
+    return should, {
+        "reason": "score_gap_narrow" if should else "score_gap_sufficient",
+        "top1": round(top1, 6),
+        "top5": round(top5, 6),
+        "gap_ratio": round(gap_ratio, 6),
+        "threshold": threshold,
+    }
+
+
 @dataclass(frozen=True)
 class DashScopeEvidenceReranker:
     api_key: str
@@ -77,8 +104,9 @@ class DashScopeEvidenceReranker:
         )
 
     def _rerank_once(self, query: str, documents: list[str]) -> list[tuple[int, float]]:
+        api_key = get_api_key() or self.api_key
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         payload = {
@@ -106,6 +134,26 @@ class DashScopeEvidenceReranker:
                 continue
             output.append((int(index), float(score)))
         return output
+
+
+class PassThroughReranker:
+    """Identity reranker for tests and offline mode."""
+
+    def rerank(
+        self,
+        question: Question,
+        candidates: list[RetrievalResult],
+        *,
+        top_k: int = 24,
+    ) -> tuple[list[RetrievalResult], RerankReport]:
+        unique = _dedupe(candidates)
+        ordered = sorted(unique, key=lambda item: item.score, reverse=True)[:top_k]
+        return ordered, RerankReport(
+            candidate_count=len(candidates),
+            selected_count=len(ordered),
+            covered_doc_ids=list(dict.fromkeys(item.doc_id for item in ordered)),
+            scoring=[],
+        )
 
 
 def create_evidence_reranker(settings: Settings) -> DashScopeEvidenceReranker:

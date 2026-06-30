@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
 from pathlib import Path
 
 from finlongrag.core.config import Settings
@@ -11,10 +13,13 @@ from finlongrag.index.bm25 import BM25FIndex
 from finlongrag.index.document import DocumentIndex
 from finlongrag.index.faiss_store import create_configured_vector_store
 from finlongrag.index.providers import create_embedding_provider
-from finlongrag.reasoning.llm import QwenChatModel
+from finlongrag.reasoning.llm import QwenChatModel, llm_model_scope
 from finlongrag.reasoning.pipeline import ReasoningPipeline
+from finlongrag.reasoning.streaming import AnswerStreamEvent
 from finlongrag.retrieval.retriever import Retriever
 from finlongrag.storage.knowledge_repository import create_knowledge_repository
+
+logger = logging.getLogger(__name__)
 
 
 class FinLongRAGPipeline:
@@ -31,17 +36,13 @@ class FinLongRAGPipeline:
     ) -> None:
         self.settings = settings or Settings.from_file()
         self.settings.ensure_dirs()
-        self.index_version: dict[str, object] | None = None
 
-        # Force use of global merged indexes for multi-KB support
-        if index_path is None:
-            index_path = self.settings.index_dir / "bm25_index_global.pkl"
-        if doc_index_path is None:
-            doc_index_path = self.settings.index_dir / "document_index_global.pkl"
-
+        # Use smart index resolution: global merge → active KB version → legacy fallback
+        index_path, doc_index_path, self.index_version = _resolve_index_paths(
+            self.settings, index_path=index_path, doc_index_path=doc_index_path
+        )
         self.index_path = index_path
         self.doc_index_path = doc_index_path
-        self.index_version = None  # Global index has no single version
         self.trace_recorder = trace_recorder or TraceRecorder(self.settings.output_dir / "traces.jsonl")
         self.index = _load_bm25_or_empty(self.index_path, tokenizer_mode=self.settings.tokenizer_mode)
         self.doc_index = _load_document_index_or_empty(self.doc_index_path, tokenizer_mode=self.settings.tokenizer_mode)
@@ -68,20 +69,39 @@ class FinLongRAGPipeline:
             evidence_per_claim=self.settings.evidence_per_claim,
             evidence_chars_per_claim=self.settings.evidence_chars_per_claim,
             settings=self.settings,
+            trace_recorder=self.trace_recorder,
         )
 
-    def answer(self, question: Question, *, history: str = "") -> AnswerResult:
-        with trace_run(
+    def clear_runtime_cache(self) -> None:
+        self.reasoning.agent_runtime.clear_cache()
+
+    def answer(
+        self,
+        question: Question,
+        *,
+        history: str = "",
+        history_entities: dict | None = None,
+        mode: str = "auto",
+        llm_model: str | None = None,
+    ) -> AnswerResult:
+        with llm_model_scope(llm_model), trace_run(
             "finlongrag-answer",
             self.trace_recorder,
             qid=question.qid,
             domain=question.domain,
             answer_format=question.answer_format,
         ) as run:
-            result = self.reasoning.answer(question, history=history)
+            result = self.reasoning.answer(
+                question,
+                history=history,
+                history_entities=history_entities or {},
+                mode=mode,
+            )
             result.metadata.setdefault("trace_id", run.trace_id)
             if self.index_version:
                 result.metadata.setdefault("index_version", self.index_version)
+            if llm_model:
+                result.metadata.setdefault("llm_model", llm_model)
             return result
 
     def ask(
@@ -94,20 +114,110 @@ class FinLongRAGPipeline:
         kb_ids: list[str] | None = None,
         qid: str = "adhoc",
         history: str = "",
+        history_entities: dict | None = None,
+        mode: str = "auto",
+        llm_model: str | None = None,
     ) -> AnswerResult:
-        question = Question(
-            qid=qid,
-            question=text,
+        question = _build_question(
+            text,
             domain=domain,
-            doc_ids=doc_ids or [],
-            answer_format="open",
+            doc_ids=doc_ids,
+            kb_id=kb_id,
+            kb_ids=kb_ids,
+            qid=qid,
         )
-        # 处理多知识库融合或单知识库隔离
-        if kb_ids:
-            question.metadata = {"kb_ids": kb_ids}
-        elif kb_id:
-            question.metadata = {"kb_id": kb_id}
-        return self.answer(question, history=history)
+        return self.answer(
+            question,
+            history=history,
+            history_entities=history_entities,
+            mode=mode,
+            llm_model=llm_model,
+        )
+
+    def answer_stream(
+        self,
+        question: Question,
+        *,
+        history: str = "",
+        history_entities: dict | None = None,
+        mode: str = "auto",
+        llm_model: str | None = None,
+    ) -> Iterator[AnswerStreamEvent]:
+        with llm_model_scope(llm_model), trace_run(
+            "finlongrag-answer-stream",
+            self.trace_recorder,
+            qid=question.qid,
+            domain=question.domain,
+            answer_format=question.answer_format,
+        ) as run:
+            for event in self.reasoning.answer_stream(
+                question,
+                history=history,
+                history_entities=history_entities or {},
+                mode=mode,
+            ):
+                if event.done and event.result is not None:
+                    event.result.metadata.setdefault("trace_id", run.trace_id)
+                    if self.index_version:
+                        event.result.metadata.setdefault("index_version", self.index_version)
+                    if llm_model:
+                        event.result.metadata.setdefault("llm_model", llm_model)
+                yield event
+
+    def ask_stream(
+        self,
+        text: str,
+        *,
+        domain: str = "",
+        doc_ids: list[str] | None = None,
+        kb_id: str | None = None,
+        kb_ids: list[str] | None = None,
+        qid: str = "adhoc",
+        history: str = "",
+        history_entities: dict | None = None,
+        mode: str = "auto",
+        llm_model: str | None = None,
+    ) -> Iterator[AnswerStreamEvent]:
+        question = _build_question(
+            text,
+            domain=domain,
+            doc_ids=doc_ids,
+            kb_id=kb_id,
+            kb_ids=kb_ids,
+            qid=qid,
+        )
+        yield from self.answer_stream(
+            question,
+            history=history,
+            history_entities=history_entities,
+            mode=mode,
+            llm_model=llm_model,
+        )
+
+
+def _build_question(
+    text: str,
+    *,
+    domain: str,
+    doc_ids: list[str] | None,
+    kb_id: str | None,
+    kb_ids: list[str] | None,
+    qid: str,
+) -> Question:
+    question = Question(
+        qid=qid,
+        question=text,
+        domain=domain,
+        doc_ids=doc_ids or [],
+        answer_format="open",
+    )
+    if kb_ids:
+        question.metadata = {"kb_ids": kb_ids}
+        if len(kb_ids) == 1:
+            question.metadata["kb_id"] = kb_ids[0]
+    elif kb_id:
+        question.metadata = {"kb_id": kb_id}
+    return question
 
 
 def _resolve_index_paths(
@@ -124,34 +234,19 @@ def _resolve_index_paths(
     global_doc = settings.index_dir / "document_index_global.pkl"
 
     if global_bm25.exists() and global_doc.exists():
-        print(f"[INFO] Loading global indexes: {global_bm25}")
+        logger.info("Loading global indexes: %s", global_bm25)
         return global_bm25, global_doc, {"type": "global", "kb_id": None}
 
-    # Priority 2: Try single KB active version (legacy)
-    active_version = _load_active_index_version(settings)
-    if active_version:
-        chunk_path = Path(str(active_version["chunk_index_path"]))
-        document_path = Path(str(active_version["document_index_path"]))
-        if chunk_path.exists() and document_path.exists():
-            print(f"[INFO] Loading single KB index: {chunk_path}")
-            return chunk_path, document_path, active_version
+    # Priority 2: legacy single-KB files only when explicitly present on disk.
+    # Do not pick an arbitrary active version across knowledge bases.
+    legacy_bm25 = settings.index_dir / "bm25_index.pkl"
+    legacy_doc = settings.index_dir / "document_index.pkl"
+    if legacy_bm25.exists() and legacy_doc.exists():
+        logger.info("Loading legacy index paths: %s", legacy_bm25)
+        return legacy_bm25, legacy_doc, None
 
-    # Priority 3: Fallback to legacy paths
-    print(f"[INFO] Fallback to legacy index paths")
-    return (
-        settings.index_dir / "bm25_index.pkl",
-        doc_index_path or settings.index_dir / "document_index.pkl",
-        None,
-    )
-
-
-def _load_active_index_version(settings: Settings) -> dict[str, object] | None:
-    try:
-        repository = create_knowledge_repository(settings.database_url)
-        record = repository.get_active_index_version()
-    except Exception:
-        return None
-    return record.to_dict() if record else None
+    logger.info("No global or legacy indexes found; using empty in-memory indexes")
+    return legacy_bm25, legacy_doc, None
 
 
 def _load_bm25_or_empty(path: Path, *, tokenizer_mode: str) -> BM25FIndex:

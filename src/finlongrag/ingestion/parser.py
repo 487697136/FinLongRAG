@@ -1,25 +1,39 @@
 """Document parsing utilities.
 
-The parser is deterministic and model-free. It currently handles PDF, text,
-Markdown, and simple HTML files. PDF extraction uses PyMuPDF when available.
+PDF files are converted with ``opendataloader-pdf`` (``pip install opendataloader-pdf``).
+Other formats use simple built-in parsers.
 """
 
 from __future__ import annotations
 
 import csv
 import html
+import inspect
 import json
 import re
+import shutil
+import tempfile
 from pathlib import Path
+from typing import Any
 
+import opendataloader_pdf
+
+from finlongrag.core.config import Settings
 from finlongrag.core.schema import Document, PageText
 
+_PAGE_SEPARATOR = "\n\n---PAGE-%page-number%---\n\n"
 
-def parse_document(document: Document) -> tuple[Document, list[PageText]]:
+
+def parse_document(
+    document: Document,
+    *,
+    settings: Settings | None = None,
+) -> tuple[Document, list[PageText]]:
     path = document.path_obj
     suffix = path.suffix.lower()
+
     if suffix == ".pdf":
-        pages = _parse_pdf(path, document)
+        pages = _parse_pdf(path, document, settings)
     elif suffix in {".txt", ".md"}:
         pages = _parse_text(path, document)
     elif suffix in {".html", ".htm"}:
@@ -34,34 +48,231 @@ def parse_document(document: Document) -> tuple[Document, list[PageText]]:
         raise ValueError(f"unsupported document type: {path}")
 
     raw_text = "\n\n".join(page.text for page in pages if page.text)
+    parser_name = pages[0].metadata.get("parser", "finlongrag.parser") if pages else "finlongrag.parser"
     parsed = Document(
         doc_id=document.doc_id,
         domain=document.domain,
         title=document.title or _infer_title(raw_text, path.stem),
         path=document.path,
         raw_text=raw_text,
-        metadata={**document.metadata, "page_count": len(pages), "parser": "finlongrag.parser"},
+        metadata={**document.metadata, "page_count": len(pages), "parser": parser_name},
     )
     return parsed, pages
 
 
-def _parse_pdf(path: Path, document: Document) -> list[PageText]:
+def _parse_pdf(path: Path, document: Document, settings: Settings | None) -> list[PageText]:
+    convert_kwargs: dict = {
+        "input_path": str(path.resolve()),
+        "format": "markdown",
+        "quiet": True,
+        "markdown_with_html": True,
+        "image_output": "off",
+        "markdown_page_separator": _PAGE_SEPARATOR,
+    }
+    if settings and settings.pdf_hybrid and settings.pdf_hybrid.lower() not in {"off", "none", ""}:
+        convert_kwargs["hybrid"] = settings.pdf_hybrid
+        if settings.pdf_hybrid_url:
+            convert_kwargs["hybrid_url"] = settings.pdf_hybrid_url
+
+    with tempfile.TemporaryDirectory(prefix="finlongrag-pdf-") as tmp:
+        output_dir = Path(tmp)
+        convert_result = _convert_pdf(output_dir=output_dir, convert_kwargs=convert_kwargs)
+        markdown_text = _extract_markdown_from_result(convert_result)
+        if markdown_text:
+            return markdown_to_pages(markdown_text, document, path)
+
+        md_path = _find_generated_file(output_dir, path.stem, suffix=".md")
+        if md_path is not None:
+            return markdown_to_pages(md_path.read_text(encoding="utf-8"), document, path)
+
+        text_pages = _parse_pdf_via_text_output(path, document, output_dir=output_dir, settings=settings)
+        if text_pages:
+            return text_pages
+
+        pymupdf_pages = _parse_pdf_via_pymupdf(path, document)
+        if pymupdf_pages:
+            return pymupdf_pages
+
+        pypdf_pages = _parse_pdf_via_pypdf(path, document)
+        if pypdf_pages:
+            return pypdf_pages
+
+        raise RuntimeError(
+            f"failed to parse PDF {path.name}: no markdown/text output from opendataloader-pdf and no extractable text via pypdf/pymupdf. "
+            "This file is likely a scanned image PDF; enable OCR (install Tesseract) or configure opendataloader hybrid OCR backend."
+        )
+
+
+def _convert_pdf(*, output_dir: Path, convert_kwargs: dict) -> Any:
+    """Call opendataloader-pdf while tolerating minor version signature drift."""
+    signature = inspect.signature(opendataloader_pdf.convert)
+    accepted = set(signature.parameters)
+    kwargs = {key: value for key, value in convert_kwargs.items() if key in accepted}
+    if "output_dir" in accepted:
+        kwargs["output_dir"] = str(output_dir)
+        return opendataloader_pdf.convert(**kwargs)
+    return opendataloader_pdf.convert(str(output_dir), **kwargs)
+
+
+def _extract_markdown_from_result(result: Any) -> str:
+    """Best-effort extraction for newer opendataloader return payloads."""
+    if isinstance(result, str):
+        return result.strip()
+    if isinstance(result, dict):
+        for key in ("markdown", "md", "content", "text"):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
+
+
+def _find_generated_file(output_dir: Path, stem: str, *, suffix: str) -> Path | None:
+    preferred = output_dir / f"{stem}{suffix}"
+    if preferred.exists():
+        return preferred
+    matches = sorted(output_dir.rglob(f"*{suffix}"))
+    return matches[0] if matches else None
+
+
+def _parse_pdf_via_text_output(
+    path: Path,
+    document: Document,
+    *,
+    output_dir: Path,
+    settings: Settings | None,
+) -> list[PageText]:
+    text_kwargs: dict[str, Any] = {
+        "input_path": str(path.resolve()),
+        "format": "text",
+        "quiet": True,
+        "text_page_separator": _PAGE_SEPARATOR,
+    }
+    if settings and settings.pdf_hybrid and settings.pdf_hybrid.lower() not in {"off", "none", ""}:
+        text_kwargs["hybrid"] = settings.pdf_hybrid
+        if settings.pdf_hybrid_url:
+            text_kwargs["hybrid_url"] = settings.pdf_hybrid_url
+    _convert_pdf(output_dir=output_dir, convert_kwargs=text_kwargs)
+    txt_path = _find_generated_file(output_dir, path.stem, suffix=".txt")
+    if txt_path is None:
+        return []
+    text = txt_path.read_text(encoding="utf-8", errors="ignore")
+    return _text_to_pages(text, document, path, parser_name="opendataloader-pdf:text")
+
+
+def _parse_pdf_via_pypdf(path: Path, document: Document) -> list[PageText]:
     try:
-        import fitz
-    except Exception as exc:
-        raise RuntimeError("PyMuPDF is required to parse PDF files") from exc
+        from pypdf import PdfReader
+    except Exception:
+        return []
 
     pages: list[PageText] = []
-    with fitz.open(path) as pdf:
-        for index, page in enumerate(pdf, start=1):
-            text = _normalize_text(page.get_text("text") or "")
-            pages.append(PageText(document.doc_id, document.domain, index, text, {"source": str(path)}))
+    try:
+        reader = PdfReader(str(path))
+    except Exception:
+        return []
+    for page_no, page in enumerate(reader.pages, start=1):
+        text = _normalize_text(page.extract_text() or "")
+        if not text:
+            continue
+        pages.append(_page(document, path, page_no, text, parser_name="pypdf"))
     return pages
+
+
+def _parse_pdf_via_pymupdf(path: Path, document: Document) -> list[PageText]:
+    try:
+        import fitz
+    except Exception:
+        return []
+
+    pages: list[PageText] = []
+    try:
+        pdf = fitz.open(str(path))
+    except Exception:
+        return []
+    try:
+        can_try_ocr = _has_tesseract()
+        for page_no, page in enumerate(pdf, start=1):
+            text = _normalize_text(page.get_text("text") or "")
+            if not text and can_try_ocr and hasattr(page, "get_textpage_ocr"):
+                try:
+                    ocr_page = page.get_textpage_ocr(dpi=300, full=True)
+                    text = _normalize_text(page.get_text("text", textpage=ocr_page) or "")
+                except Exception:
+                    text = ""
+            if not text:
+                continue
+            parser_name = "pymupdf+ocr" if can_try_ocr else "pymupdf"
+            pages.append(_page(document, path, page_no, text, parser_name=parser_name))
+    finally:
+        pdf.close()
+    return pages
+
+
+def _has_tesseract() -> bool:
+    return bool(shutil.which("tesseract"))
+
+
+def markdown_to_pages(markdown_text: str, document: Document, source_path: Path) -> list[PageText]:
+    """Split OpenDataLoader markdown output into PageText (one entry per page)."""
+    parts = re.split(r"---PAGE-(\d+)---", markdown_text)
+    pages: list[PageText] = []
+
+    if len(parts) < 3:
+        text = _normalize_text(markdown_text)
+        if text:
+            pages.append(_page(document, source_path, 1, text))
+        return pages
+
+    leading = _normalize_text(parts[0])
+    if leading:
+        pages.append(_page(document, source_path, 1, leading))
+
+    index = 1
+    while index < len(parts) - 1:
+        page_no = int(parts[index])
+        body = _normalize_text(parts[index + 1])
+        if body:
+            pages.append(_page(document, source_path, page_no, body))
+        index += 2
+
+    return pages
+
+
+def _text_to_pages(text: str, document: Document, source_path: Path, *, parser_name: str) -> list[PageText]:
+    parts = re.split(r"---PAGE-(\d+)---", text)
+    pages: list[PageText] = []
+    if len(parts) < 3:
+        normalized = _normalize_text(text)
+        if normalized:
+            pages.append(_page(document, source_path, 1, normalized, parser_name=parser_name))
+        return pages
+
+    leading = _normalize_text(parts[0])
+    if leading:
+        pages.append(_page(document, source_path, 1, leading, parser_name=parser_name))
+    index = 1
+    while index < len(parts) - 1:
+        page_no = int(parts[index])
+        body = _normalize_text(parts[index + 1])
+        if body:
+            pages.append(_page(document, source_path, page_no, body, parser_name=parser_name))
+        index += 2
+    return pages
+
+
+def _page(document: Document, source_path: Path, page_no: int, text: str, *, parser_name: str = "opendataloader-pdf") -> PageText:
+    return PageText(
+        document.doc_id,
+        document.domain,
+        page_no,
+        text,
+        {"source": str(source_path), "parser": parser_name},
+    )
 
 
 def _parse_text(path: Path, document: Document) -> list[PageText]:
     text = _normalize_text(path.read_text(encoding="utf-8", errors="ignore"))
-    return [PageText(document.doc_id, document.domain, 1, text, {"source": str(path)})]
+    return [PageText(document.doc_id, document.domain, 1, text, {"source": str(path), "parser": "text"})]
 
 
 def _parse_html(path: Path, document: Document) -> list[PageText]:
@@ -70,7 +281,7 @@ def _parse_html(path: Path, document: Document) -> list[PageText]:
     raw = re.sub(r"(?is)<br\s*/?>", "\n", raw)
     raw = re.sub(r"(?is)</p>|</div>|</tr>|</h[1-6]>", "\n", raw)
     text = html.unescape(re.sub(r"(?is)<.*?>", "", raw))
-    return [PageText(document.doc_id, document.domain, 1, _normalize_text(text), {"source": str(path)})]
+    return [PageText(document.doc_id, document.domain, 1, _normalize_text(text), {"source": str(path), "parser": "html"})]
 
 
 def _parse_csv(path: Path, document: Document) -> list[PageText]:
@@ -80,7 +291,7 @@ def _parse_csv(path: Path, document: Document) -> list[PageText]:
         for row in reader:
             rows.append(" | ".join(str(cell).strip() for cell in row if str(cell).strip()))
     text = _normalize_text("\n".join(row for row in rows if row))
-    return [PageText(document.doc_id, document.domain, 1, text, {"source": str(path), "format": "csv"})]
+    return [PageText(document.doc_id, document.domain, 1, text, {"source": str(path), "parser": "csv", "format": "csv"})]
 
 
 def _parse_json(path: Path, document: Document) -> list[PageText]:
@@ -90,13 +301,13 @@ def _parse_json(path: Path, document: Document) -> list[PageText]:
         text = json.dumps(data, ensure_ascii=False, indent=2)
     except json.JSONDecodeError:
         text = raw
-    return [PageText(document.doc_id, document.domain, 1, _normalize_text(text), {"source": str(path), "format": "json"})]
+    return [PageText(document.doc_id, document.domain, 1, _normalize_text(text), {"source": str(path), "parser": "json", "format": "json"})]
 
 
 def _parse_xlsx(path: Path, document: Document) -> list[PageText]:
     try:
         from openpyxl import load_workbook
-    except Exception as exc:
+    except ImportError as exc:
         raise RuntimeError("openpyxl is required to parse xlsx files") from exc
 
     workbook = load_workbook(path, read_only=True, data_only=True)
@@ -114,7 +325,7 @@ def _parse_xlsx(path: Path, document: Document) -> list[PageText]:
                     document.domain,
                     index,
                     _normalize_text("\n".join(lines)),
-                    {"source": str(path), "format": "xlsx", "sheet": sheet.title},
+                    {"source": str(path), "parser": "xlsx", "format": "xlsx", "sheet": sheet.title},
                 )
             )
     finally:
@@ -131,7 +342,7 @@ def _normalize_text(text: str) -> str:
 
 def _infer_title(text: str, default_title: str) -> str:
     for line in text.splitlines()[:20]:
-        line = line.strip()
+        line = line.strip().lstrip("#").strip()
         if len(line) >= 4 and not re.fullmatch(r"(?:第)?\d{1,4}(?:页)?", line):
             return line[:120]
     return default_title

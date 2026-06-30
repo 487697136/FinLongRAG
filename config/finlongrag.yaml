@@ -19,7 +19,7 @@ retrieval:
   vector_embedding_provider: dashscope
   vector_embedding_model: text-embedding-v4
   vector_dimension: 1024
-  vector_batch_size: 16
+  vector_batch_size: 10
   vector_store: faiss
   bm25_channel_weight: 1.0
   vector_channel_weight: 0.65
@@ -36,6 +36,33 @@ reasoning:
   parent_window_chars: 900
   evidence_per_claim: 4
   evidence_chars_per_claim: 3200
+
+ingestion:
+  # Scanned/complex PDFs: pip install "opendataloader-pdf[hybrid]" && opendataloader-pdf-hybrid --port 5002
+  pdf_hybrid: off
+  pdf_hybrid_url: ""
+
+agent:
+  conditional_rerank_enabled: true
+  rerank_trigger_threshold: 0.15
+  query_cache_enabled: true
+  query_cache_max_entries: 256
+  query_cache_ttl_seconds: 3600
+  require_kb_scope_for_rag: true
+
+api:
+  upload_max_bytes: 104857600
+  upload_allowed_extensions:
+    - .pdf
+    - .txt
+    - .md
+    - .docx
+    - .xlsx
+    - .csv
+    - .json
+    - .jsonl
+  cors_origins:
+    - "*"
 
 paths:
   processed_dir: data/processed

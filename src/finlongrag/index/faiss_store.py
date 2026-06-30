@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+from finlongrag.core.file_lock import exclusive_file_lock
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -47,12 +49,100 @@ class FaissVectorStore:
         if self.dimension <= 0:
             raise ValueError("vector dimension must be positive")
 
+    def append_embeddings(self, *, kb_id: str, new_chunks: list[Chunk], provider: EmbeddingProvider) -> dict:
+        """Append embeddings for new chunks to an existing FAISS index."""
+        if provider.dimension != self.dimension:
+            raise ValueError(f"provider dimension mismatch: {provider.dimension} != {self.dimension}")
+        if not new_chunks:
+            manifest_path = self._kb_dir(kb_id) / "manifest.json"
+            if manifest_path.exists():
+                return json.loads(manifest_path.read_text(encoding="utf-8"))
+            raise ValueError("no chunks to append and no existing FAISS index")
+
+        target_dir = self._kb_dir(kb_id)
+        lock_path = target_dir / ".faiss.lock"
+        with exclusive_file_lock(lock_path):
+            return self._append_embeddings_locked(
+                kb_id=kb_id,
+                new_chunks=new_chunks,
+                provider=provider,
+                target_dir=target_dir,
+            )
+
+    def _append_embeddings_locked(
+        self,
+        *,
+        kb_id: str,
+        new_chunks: list[Chunk],
+        provider: EmbeddingProvider,
+        target_dir: Path,
+    ) -> dict:
+        index_path = target_dir / "index.faiss"
+        metadata_path = target_dir / "metadata.jsonl"
+        if not index_path.exists() or not metadata_path.exists():
+            return self._replace_embeddings_locked(
+                kb_id=kb_id,
+                chunks=new_chunks,
+                provider=provider,
+                target_dir=target_dir,
+            )
+
+        existing_rows = _read_jsonl(metadata_path)
+        existing_chunk_ids = {str(row.get("chunk_id") or "") for row in existing_rows}
+        chunks_to_add = [chunk for chunk in new_chunks if chunk.chunk_id not in existing_chunk_ids]
+        if not chunks_to_add:
+            manifest_path = target_dir / "manifest.json"
+            return json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+
+        texts = [_embedding_text(chunk, tokenizer_mode=self.tokenizer_mode) for chunk in chunks_to_add]
+        vectors = _normalize(provider.embed_batch(texts))
+        index = _read_faiss_index(index_path)
+        index.add(vectors)
+
+        new_rows = [_chunk_row(chunk, text, provider) for chunk, text in zip(chunks_to_add, texts, strict=True)]
+        combined_rows = existing_rows + new_rows
+        _atomic_write_faiss_index(index, index_path)
+        _atomic_write_jsonl(metadata_path, combined_rows)
+        manifest = {
+            "store": self.name,
+            "kb_id": kb_id,
+            "provider": provider.name,
+            "model": str(getattr(provider, "model", provider.name)),
+            "dimension": provider.dimension,
+            "chunks": len(existing_rows) + len(new_rows),
+            "index_path": str(index_path),
+            "metadata_path": str(metadata_path),
+            "incremental": True,
+            "appended_chunks": len(new_rows),
+        }
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        return manifest
+
     def replace_embeddings(self, *, kb_id: str, chunks: list[Chunk], provider: EmbeddingProvider) -> dict:
         if provider.dimension != self.dimension:
             raise ValueError(f"provider dimension mismatch: {provider.dimension} != {self.dimension}")
         if not chunks:
             raise ValueError("no chunks available for FAISS embedding")
 
+        target_dir = self._kb_dir(kb_id)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = target_dir / ".faiss.lock"
+        with exclusive_file_lock(lock_path):
+            return self._replace_embeddings_locked(
+                kb_id=kb_id,
+                chunks=chunks,
+                provider=provider,
+                target_dir=target_dir,
+            )
+
+    def _replace_embeddings_locked(
+        self,
+        *,
+        kb_id: str,
+        chunks: list[Chunk],
+        provider: EmbeddingProvider,
+        target_dir: Path,
+    ) -> dict:
         texts = [_embedding_text(chunk, tokenizer_mode=self.tokenizer_mode) for chunk in chunks]
         vectors = _normalize(provider.embed_batch(texts))
         if vectors.shape != (len(chunks), self.dimension):
@@ -61,17 +151,13 @@ class FaissVectorStore:
         index = faiss.IndexFlatIP(self.dimension)
         index.add(vectors)
 
-        target_dir = self._kb_dir(kb_id)
-        target_dir.mkdir(parents=True, exist_ok=True)
         index_path = target_dir / "index.faiss"
         metadata_path = target_dir / "metadata.jsonl"
         manifest_path = target_dir / "manifest.json"
 
-        _write_faiss_index(index, index_path)
         rows = [_chunk_row(chunk, text, provider) for chunk, text in zip(chunks, texts, strict=True)]
-        with metadata_path.open("w", encoding="utf-8") as f:
-            for row in rows:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        _atomic_write_faiss_index(index, index_path)
+        _atomic_write_jsonl(metadata_path, rows)
         manifest = {
             "store": self.name,
             "kb_id": kb_id,
@@ -154,6 +240,22 @@ def build_faiss_embeddings(settings, *, kb_id: str, chunks: list[Chunk]) -> dict
     return store.replace_embeddings(kb_id=kb_id, chunks=chunks, provider=provider)
 
 
+def append_faiss_embeddings(settings, *, kb_id: str, new_chunks: list[Chunk]) -> dict:
+    store = create_configured_vector_store(settings, kb_id=kb_id)
+    if store is None:
+        raise ValueError("FAISS store requires FINLONGRAG_VECTOR_STORE=faiss")
+    provider = create_embedding_provider(settings)
+    return store.append_embeddings(kb_id=kb_id, new_chunks=new_chunks, provider=provider)
+
+
+def faiss_index_exists(settings, *, kb_id: str) -> bool:
+    store = create_configured_vector_store(settings, kb_id=kb_id)
+    if store is None:
+        return False
+    kb_dir = store._kb_dir(kb_id)
+    return (kb_dir / "index.faiss").exists() and (kb_dir / "metadata.jsonl").exists()
+
+
 def _chunk_row(chunk: Chunk, embedding_text: str, provider: EmbeddingProvider) -> dict[str, Any]:
     return {
         "chunk": chunk.to_dict(),
@@ -206,6 +308,20 @@ def _normalize(vectors: np.ndarray) -> np.ndarray:
 def _write_faiss_index(index, path: Path) -> None:
     serialized = faiss.serialize_index(index)
     path.write_bytes(np.asarray(serialized, dtype=np.uint8).tobytes())
+
+
+def _atomic_write_faiss_index(index, path: Path) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    _write_faiss_index(index, tmp)
+    os.replace(tmp, path)
+
+
+def _atomic_write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    os.replace(tmp, path)
 
 
 def _read_faiss_index(path: Path):

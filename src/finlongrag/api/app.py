@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Callable
 from functools import lru_cache
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from finlongrag.api.helpers import redact_database_url
 from finlongrag.api.schemas import (
     ApiResponse,
     ChatRequest,
@@ -21,6 +24,7 @@ from finlongrag.api.schemas import (
     RunIngestionRequest,
 )
 from finlongrag.api.v1 import create_v1_router
+from finlongrag.conversation.memory import ConversationMemory
 from finlongrag.conversation.service import ChatService
 from finlongrag.core.config import Settings
 from finlongrag.knowledge.service import KnowledgeService
@@ -43,13 +47,10 @@ class SPAStaticFiles(StaticFiles):
 
 def create_app(*, dry_run: bool = False) -> FastAPI:
     app = FastAPI(title="FinLongRAG API", version="0.1.0")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+
+    @app.exception_handler(KeyError)
+    def key_error_handler(_request, exc: KeyError) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
 
     @lru_cache(maxsize=1)
     def settings() -> Settings:
@@ -57,17 +58,39 @@ def create_app(*, dry_run: bool = False) -> FastAPI:
         loaded.ensure_dirs()
         return loaded
 
+    cors_origins = list(settings().cors_origins) or ["*"]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     @lru_cache(maxsize=1)
     def chat_service() -> ChatService:
         loaded = settings()
         repository = create_conversation_repository(loaded.database_url)
         pipeline = FinLongRAGPipeline(loaded, dry_run=dry_run)
-        return ChatService(pipeline, repository)
+        memory = ConversationMemory(llm=pipeline.llm)
+        return ChatService(pipeline, repository, memory=memory)
 
     @lru_cache(maxsize=1)
     def knowledge_service() -> KnowledgeService:
         loaded = settings()
         return KnowledgeService(loaded, create_knowledge_repository(loaded.database_url))
+
+    def clear_pipeline_state() -> None:
+        chat_service.cache_clear()
+        try:
+            chat_service().pipeline.clear_runtime_cache()
+        except Exception:
+            pass
+
+    @app.on_event("startup")
+    def _validate_runtime_config() -> None:
+        """Validate security-related configuration at startup."""
+        _ = settings()
 
     @app.get("/api/health")
     def health() -> ApiResponse:
@@ -78,10 +101,19 @@ def create_app(*, dry_run: bool = False) -> FastAPI:
         return ApiResponse(
             data={
                 "status": "ok",
-                "database_url": _redact_database_url(loaded.database_url),
-                "index_ready": (loaded.index_dir / "bm25_index.pkl").exists(),
-                "doc_index_ready": (loaded.index_dir / "document_index.pkl").exists(),
-                "vector_index_ready": (loaded.index_dir / "vector_index.pkl").exists(),
+                "database_url": redact_database_url(loaded.database_url),
+                "index_ready": (
+                    (loaded.index_dir / "bm25_index_global.pkl").exists()
+                    or (loaded.index_dir / "bm25_index.pkl").exists()
+                ),
+                "doc_index_ready": (
+                    (loaded.index_dir / "document_index_global.pkl").exists()
+                    or (loaded.index_dir / "document_index.pkl").exists()
+                ),
+                "vector_index_ready": any(
+                    (loaded.index_dir / "faiss").joinpath(d).is_dir()
+                    for d in [""]
+                ) or (loaded.index_dir / "faiss").exists(),
                 "vector_retrieval_enabled": loaded.enable_vector_retrieval,
                 "vector_store": loaded.vector_store,
                 "embedding_provider": loaded.vector_embedding_provider,
@@ -93,9 +125,43 @@ def create_app(*, dry_run: bool = False) -> FastAPI:
                 "knowledge_bases": kb_count,
                 "knowledge_documents": document_count,
                 "dry_run": dry_run,
+                "legacy_api_enabled": loaded.enable_legacy_api,
             }
         )
 
+    if settings().enable_legacy_api:
+        _register_legacy_routes(
+            app,
+            chat_service=chat_service,
+            knowledge_service=knowledge_service,
+            clear_chat_cache=clear_pipeline_state,
+        )
+
+    app.include_router(
+        create_v1_router(
+            settings_provider=settings,
+            chat_service_provider=chat_service,
+            knowledge_service_provider=knowledge_service,
+            clear_chat_cache=clear_pipeline_state,
+            dry_run=dry_run,
+        ),
+        prefix="/api/v1",
+    )
+
+    frontend_dist = settings().project_root / "frontend" / "dist"
+    if frontend_dist.exists():
+        app.mount("/", SPAStaticFiles(directory=frontend_dist, html=True), name="frontend")
+
+    return app
+
+
+def _register_legacy_routes(
+    app: FastAPI,
+    *,
+    chat_service: Callable[[], ChatService],
+    knowledge_service: Callable[[], KnowledgeService],
+    clear_chat_cache: Callable[[], None],
+) -> None:
     @app.post("/api/conversations")
     def create_conversation(payload: CreateConversationRequest) -> ApiResponse:
         conversation = chat_service().create_conversation(title=payload.title, metadata=payload.metadata)
@@ -135,15 +201,24 @@ def create_app(*, dry_run: bool = False) -> FastAPI:
         def event_stream():
             yield _sse("meta", {"conversation_id": conversation_id, "domain": domain, "doc_ids": parsed_doc_ids})
             try:
-                response = chat_service().ask(
+                response = None
+                for event in chat_service().ask_stream(
                     message,
                     conversation_id=conversation_id,
                     domain=domain,
                     doc_ids=parsed_doc_ids,
-                )
+                ):
+                    if event.status:
+                        yield _sse("status", {"status": event.status})
+                    if event.content:
+                        yield _sse("message", {"type": "answer", "delta": event.content})
+                    if event.done and event.chat is not None:
+                        response = event.chat
+
+                if response is None:
+                    raise RuntimeError("Stream ended without a final answer.")
+
                 answer = response.result.answer
-                for chunk in _chunks(answer, size=24):
-                    yield _sse("message", {"type": "answer", "delta": chunk})
                 yield _sse(
                     "finish",
                     {
@@ -211,7 +286,7 @@ def create_app(*, dry_run: bool = False) -> FastAPI:
     def run_ingestion_background(task_id: str, build_index: bool) -> None:
         task = knowledge_service().run_ingestion_task(task_id, raise_on_error=False)
         if build_index and task.status == "succeeded":
-            chat_service.cache_clear()
+            clear_chat_cache()
 
     @app.post("/api/knowledge-bases/{kb_id}/ingest")
     def ingest_knowledge_base(
@@ -236,7 +311,7 @@ def create_app(*, dry_run: bool = False) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if payload.build_index and task.status == "succeeded":
-            chat_service.cache_clear()
+            clear_chat_cache()
         return ApiResponse(data=task.to_dict())
 
     @app.get("/api/ingestion/tasks")
@@ -282,35 +357,10 @@ def create_app(*, dry_run: bool = False) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except FileNotFoundError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        chat_service.cache_clear()
+        clear_chat_cache()
         return ApiResponse(data=record.to_dict())
-
-    app.include_router(
-        create_v1_router(
-            settings_provider=settings,
-            chat_service_provider=chat_service,
-            knowledge_service_provider=knowledge_service,
-            clear_chat_cache=chat_service.cache_clear,
-            dry_run=dry_run,
-        ),
-        prefix="/api/v1",
-    )
-
-    frontend_dist = settings().project_root / "frontend" / "dist"
-    if frontend_dist.exists():
-        app.mount("/", SPAStaticFiles(directory=frontend_dist, html=True), name="frontend")
-
-    return app
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
     payload = json.dumps(data, ensure_ascii=False)
     return f"event: {event}\ndata: {payload}\n\n"
-
-
-def _chunks(text: str, *, size: int) -> list[str]:
-    return [text[index : index + size] for index in range(0, len(text), size)] or [""]
-
-
-def _redact_database_url(database_url: str) -> str:
-    return "<configured>"

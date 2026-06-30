@@ -1,9 +1,7 @@
-"""Intent taxonomy stub.
+"""Intent taxonomy placeholder.
 
-Minimal self-referential tree so `AgentRouter` (agent/router.py) can later
-load configurable intent scopes/keywords from the database instead of the
-hardcoded regex table, without forcing that migration now. Phase 5 extends
-`AgentRouter`; this table is not yet read by any code path.
+Reserved for future configurable routing. The current AgentRouter uses a
+lightweight LLM classifier and does not read this table.
 """
 
 from __future__ import annotations

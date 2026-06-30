@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import shutil
+import subprocess
 import sys
 
 import faiss
@@ -28,6 +30,29 @@ def main() -> int:
     print(f"[config] vector_store={settings.vector_store}")
     print(f"[config] dashscope_api_key={'configured' if get_api_key() else 'missing'}")
     print(f"[faiss] version={getattr(faiss, '__version__', 'unknown')}")
+
+    java = shutil.which("java")
+    if java:
+        try:
+            proc = subprocess.run([java, "-version"], capture_output=True, text=True, timeout=10, check=False)
+            version_line = (proc.stderr or proc.stdout or "").splitlines()[0] if (proc.stderr or proc.stdout) else "unknown"
+            print(f"[pdf] java={version_line}")
+        except OSError as exc:
+            ok = False
+            print(f"[pdf] java_error={exc}", file=sys.stderr)
+    else:
+        ok = False
+        print("[pdf] java=missing (required for opendataloader-pdf)", file=sys.stderr)
+
+    try:
+        import opendataloader_pdf  # noqa: F401
+
+        print(f"[pdf] opendataloader-pdf=installed")
+    except ImportError:
+        ok = False
+        print("[pdf] opendataloader-pdf=missing (pip install opendataloader-pdf)", file=sys.stderr)
+
+    print(f"[pdf] hybrid_mode={settings.pdf_hybrid or 'off'}")
 
     try:
         engine = get_sync_engine(settings.database_url)
