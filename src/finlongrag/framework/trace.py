@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 import contextvars
-import functools
 import time
 import uuid
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 from finlongrag.core.io import append_jsonl
-
-F = TypeVar("F", bound=Callable[..., Any])
 
 _TRACE_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar("trace_id", default=None)
 _NODE_STACK: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar("node_stack", default=())
@@ -126,21 +122,3 @@ class trace_run:
         _TRACE_ID.set(None)
         _NODE_STACK.set(())
         return False
-
-
-def trace_node(name: str, node_type: str, recorder: TraceRecorder) -> Callable[[F], F]:
-    def decorate(func: F) -> F:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            node = recorder.start_node(name, node_type)
-            try:
-                result = func(*args, **kwargs)
-                recorder.finish_node(node, "SUCCESS")
-                return result
-            except Exception as exc:
-                recorder.finish_node(node, "ERROR", f"{type(exc).__name__}: {exc}")
-                raise
-
-        return wrapper  # type: ignore[return-value]
-
-    return decorate

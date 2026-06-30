@@ -7,6 +7,7 @@ can see the full schema.
 
 from __future__ import annotations
 
+from finlongrag.db.models.api_key import UserApiKey
 from finlongrag.db.models.conversation import Conversation, ConversationSummary, Message, MessageFeedback
 from finlongrag.db.models.intent import IntentNode
 from finlongrag.db.models.knowledge import (
@@ -21,6 +22,7 @@ from finlongrag.db.models.trace import TraceNode, TraceRun
 from finlongrag.db.models.user import User
 
 __all__ = [
+    "UserApiKey",
     "Conversation",
     "ConversationSummary",
     "Message",

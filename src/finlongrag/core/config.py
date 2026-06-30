@@ -91,7 +91,7 @@ class Settings:
     vector_embedding_provider: str = "dashscope"
     vector_embedding_model: str = "text-embedding-v4"
     vector_dimension: int = 1024
-    vector_batch_size: int = 16
+    vector_batch_size: int = 10
     vector_store: str = "faiss"
     bm25_channel_weight: float = 1.0
     vector_channel_weight: float = 0.45
@@ -99,6 +99,18 @@ class Settings:
     rerank_model: str = "qwen3-rerank"
     rerank_base_url: str = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
     rerank_top_k_multiplier: int = 4
+    pdf_hybrid: str = "off"
+    pdf_hybrid_url: str = ""
+    enable_legacy_api: bool = False
+    conditional_rerank_enabled: bool = True
+    rerank_trigger_threshold: float = 0.15
+    query_cache_enabled: bool = True
+    query_cache_max_entries: int = 256
+    query_cache_ttl_seconds: int = 3600
+    require_kb_scope_for_rag: bool = True
+    upload_max_bytes: int = 100 * 1024 * 1024
+    upload_allowed_extensions: tuple[str, ...] = (".pdf", ".txt", ".md", ".docx", ".xlsx", ".csv", ".json", ".jsonl")
+    cors_origins: tuple[str, ...] = ("*",)
 
     @classmethod
     def from_file(cls, path: Path | None = None) -> Settings:
@@ -184,6 +196,64 @@ class Settings:
                     str(_nested(data, "rerank.top_k_multiplier", cls.rerank_top_k_multiplier)),
                 )
             ),
+            pdf_hybrid=_env(
+                "FINLONGRAG_PDF_HYBRID",
+                str(_nested(data, "ingestion.pdf_hybrid", cls.pdf_hybrid)),
+            ),
+            pdf_hybrid_url=_env(
+                "FINLONGRAG_PDF_HYBRID_URL",
+                str(_nested(data, "ingestion.pdf_hybrid_url", cls.pdf_hybrid_url)),
+            ),
+            enable_legacy_api=_env_bool("FINLONGRAG_ENABLE_LEGACY_API", cls.enable_legacy_api),
+            conditional_rerank_enabled=_env_bool(
+                "FINLONGRAG_CONDITIONAL_RERANK",
+                bool(_nested(data, "agent.conditional_rerank_enabled", cls.conditional_rerank_enabled)),
+            ),
+            rerank_trigger_threshold=float(
+                _env(
+                    "FINLONGRAG_RERANK_TRIGGER_THRESHOLD",
+                    str(_nested(data, "agent.rerank_trigger_threshold", cls.rerank_trigger_threshold)),
+                )
+            ),
+            query_cache_enabled=_env_bool(
+                "FINLONGRAG_QUERY_CACHE_ENABLED",
+                bool(_nested(data, "agent.query_cache_enabled", cls.query_cache_enabled)),
+            ),
+            query_cache_max_entries=int(
+                _env(
+                    "FINLONGRAG_QUERY_CACHE_MAX_ENTRIES",
+                    str(_nested(data, "agent.query_cache_max_entries", cls.query_cache_max_entries)),
+                )
+            ),
+            query_cache_ttl_seconds=int(
+                _env(
+                    "FINLONGRAG_QUERY_CACHE_TTL_SECONDS",
+                    str(_nested(data, "agent.query_cache_ttl_seconds", cls.query_cache_ttl_seconds)),
+                )
+            ),
+            require_kb_scope_for_rag=_env_bool(
+                "FINLONGRAG_REQUIRE_KB_SCOPE",
+                bool(_nested(data, "agent.require_kb_scope_for_rag", cls.require_kb_scope_for_rag)),
+            ),
+            upload_max_bytes=int(
+                _env(
+                    "FINLONGRAG_UPLOAD_MAX_BYTES",
+                    str(_nested(data, "api.upload_max_bytes", cls.upload_max_bytes)),
+                )
+            ),
+            upload_allowed_extensions=tuple(
+                str(item).lower()
+                for item in _nested(
+                    data,
+                    "api.upload_allowed_extensions",
+                    list(cls.upload_allowed_extensions),
+                )
+            ),
+            cors_origins=tuple(
+                str(item).strip()
+                for item in _env("FINLONGRAG_CORS_ORIGINS", ",".join(cls.cors_origins)).split(",")
+                if str(item).strip()
+            ) or cls.cors_origins,
         )
 
     def ensure_dirs(self) -> None:
@@ -194,6 +264,11 @@ class Settings:
 
 
 def get_api_key() -> str | None:
+    from finlongrag.core.api_key_context import get_request_api_key
+
+    scoped = get_request_api_key()
+    if scoped:
+        return scoped
     return (
         os.getenv("DASHSCOPE_API_KEY")
         or os.getenv("BAILIAN_API_KEY")

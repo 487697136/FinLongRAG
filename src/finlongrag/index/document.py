@@ -35,16 +35,46 @@ class DocumentIndex:
                     text="\n".join(parts)[:max_doc_chars],
                     page=None,
                     section="document",
-                    metadata={"title": title, "doc_level": True},
+                    metadata={
+                        "title": title,
+                        "doc_level": True,
+                        "kb_id": first.metadata.get("kb_id"),
+                    },
                 )
             )
         return cls(BM25FIndex.build(doc_chunks, tokenizer_mode=tokenizer_mode))
 
-    def search_doc_ids(self, query: str, top_k: int = 8, domain: str | None = None) -> list[str]:
-        filter_doc_ids = None
-        if domain:
-            filter_doc_ids = {chunk.doc_id for chunk in self.index.chunks if chunk.domain == domain}
+    def search_doc_ids(
+        self,
+        query: str,
+        top_k: int = 8,
+        domain: str | None = None,
+        kb_id: str | None = None,
+        kb_ids: list[str] | None = None,
+    ) -> list[str]:
+        filter_doc_ids = self._scoped_doc_ids(domain=domain, kb_id=kb_id, kb_ids=kb_ids)
         return [item.doc_id for item in self.index.search(query, top_k=top_k, filter_doc_ids=filter_doc_ids)]
+
+    def _scoped_doc_ids(
+        self,
+        *,
+        domain: str | None,
+        kb_id: str | None,
+        kb_ids: list[str] | None,
+    ) -> set[str] | None:
+        if not domain and not kb_id and not kb_ids:
+            return None
+        candidates = self.index.chunks
+        if domain:
+            candidates = [chunk for chunk in candidates if chunk.domain == domain]
+        if kb_ids:
+            kb_id_set = set(kb_ids)
+            candidates = [chunk for chunk in candidates if chunk.metadata.get("kb_id") in kb_id_set]
+        elif kb_id:
+            candidates = [chunk for chunk in candidates if chunk.metadata.get("kb_id") == kb_id]
+        if not candidates:
+            return set()
+        return {chunk.doc_id for chunk in candidates}
 
     def save(self, path: Path) -> None:
         self.index.save(path)

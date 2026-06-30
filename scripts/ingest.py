@@ -34,7 +34,7 @@ def main() -> None:
     chunks = []
     for index, document in enumerate(documents, start=1):
         print(f"[{index}/{len(documents)}] parsing {document.domain}/{document.doc_id}", flush=True)
-        parsed, pages = parse_document(document)
+        parsed, pages = parse_document(document, settings=settings)
         parsed_docs.append(parsed)
         chunks.extend(chunk_document(parsed, pages))
 

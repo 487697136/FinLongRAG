@@ -1,4 +1,7 @@
-"""Build chunk-level and document-level sparse indexes."""
+"""Build chunk-level and document-level sparse indexes from processed chunks.jsonl.
+
+Vector (FAISS) indexes are built by KnowledgeService.build_indexes(), not this script.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from finlongrag.core.config import Settings
-from finlongrag.index.build import build_chunk_index, build_document_index, build_vector_index
+from finlongrag.index.build import build_chunk_index, build_document_index
 
 
 def main() -> None:
@@ -25,20 +28,15 @@ def main() -> None:
     tokenizer_mode = args.tokenizer_mode or settings.tokenizer_mode
     chunk_index = build_chunk_index(chunks_path, settings.index_dir / "bm25_index.pkl", tokenizer_mode=tokenizer_mode)
     doc_index = build_document_index(chunks_path, settings.index_dir / "document_index.pkl", tokenizer_mode=tokenizer_mode)
-    vector_index = None
-    if settings.enable_vector_retrieval:
-        vector_index = build_vector_index(
-            chunks_path,
-            settings.index_dir / "vector_index.pkl",
-            tokenizer_mode=tokenizer_mode,
-            dimension=settings.vector_dimension,
-            provider_name=settings.vector_embedding_provider,
-        )
-    vector_note = f" vector_chunks={len(vector_index.chunks)}" if vector_index else ""
     print(
-        f"indexed chunks={len(chunk_index.chunks)} docs={len(doc_index.index.chunks)}{vector_note} -> {settings.index_dir}",
+        f"indexed chunks={len(chunk_index.chunks)} docs={len(doc_index.index.chunks)} -> {settings.index_dir}",
         flush=True,
     )
+    if settings.enable_vector_retrieval:
+        print(
+            "Note: FAISS vector indexes are built via KnowledgeService.build_indexes() after document ingestion.",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

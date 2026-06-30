@@ -54,6 +54,8 @@ class BM25SearchChannel:
         source = str(context.metadata.get("source", "bm25f"))
         kb_id = context.metadata.get("kb_id")
         kb_ids = context.metadata.get("kb_ids")
+        if not kb_id and isinstance(kb_ids, list) and len(kb_ids) == 1:
+            kb_id = str(kb_ids[0])
 
         # 多知识库融合：分别检索每个库，确保多样性
         if kb_ids and len(kb_ids) > 1:
@@ -113,6 +115,8 @@ class FaissSearchChannel:
     priority: int = 20
 
     def enabled(self, context: SearchContext) -> bool:
+        if not context.metadata.get("enable_vector_retrieval", True):
+            return False
         return bool(context.queries)
 
     def search(self, context: SearchContext) -> SearchChannelResult:
@@ -121,6 +125,8 @@ class FaissSearchChannel:
         source = str(context.metadata.get("source", "vector"))
         kb_id = context.metadata.get("kb_id")
         kb_ids = context.metadata.get("kb_ids")
+        if not kb_id and isinstance(kb_ids, list) and len(kb_ids) == 1:
+            kb_id = str(kb_ids[0])
 
         # 多知识库融合：分别检索每个库
         if kb_ids and len(kb_ids) > 1:

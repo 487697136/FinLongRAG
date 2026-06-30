@@ -1,8 +1,8 @@
 param(
     [string]$HostName = "127.0.0.1",
     [int]$Port = 7860,
-    [string]$CondaExe = "E:\Anaconda3\Scripts\conda.exe",
-    [string]$EnvRoot = "E:\Anaconda3",
+    [string]$CondaExe = "D:\Anaconda3\Scripts\conda.exe",
+    [string]$EnvRoot = "D:\Anaconda3",
     [string]$EnvName = "finlongrag-py312",
     [switch]$ForceFrontendBuild,
     [switch]$SkipFrontendBuild,
@@ -14,7 +14,39 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $FrontendRoot = Join-Path $ProjectRoot "frontend"
-$EnvRoot = [System.IO.Path]::GetFullPath($EnvRoot)
+function Resolve-CondaExe {
+    param([string]$Preferred)
+    if ($Preferred -and (Test-Path -LiteralPath $Preferred)) {
+        return $Preferred
+    }
+    $candidates = @(
+        "D:\Anaconda3\Scripts\conda.exe",
+        "$env:USERPROFILE\anaconda3\Scripts\conda.exe",
+        "$env:USERPROFILE\miniconda3\Scripts\conda.exe",
+        "C:\ProgramData\anaconda3\Scripts\conda.exe"
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+    }
+    $fromPath = Get-Command conda -ErrorAction SilentlyContinue
+    if ($fromPath) {
+        return $fromPath.Source
+    }
+    throw "Conda executable not found. Install Anaconda/Miniconda or pass -CondaExe."
+}
+
+function Resolve-EnvRoot {
+    param([string]$CondaExePath, [string]$Preferred)
+    if ($Preferred -and (Test-Path -LiteralPath $Preferred)) {
+        return [System.IO.Path]::GetFullPath($Preferred)
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path (Split-Path (Split-Path $CondaExePath -Parent) -Parent) ""))
+}
+
+$CondaExe = Resolve-CondaExe $CondaExe
+$EnvRoot = Resolve-EnvRoot -CondaExePath $CondaExe -Preferred $EnvRoot
 $EnvPrefix = Join-Path (Join-Path $EnvRoot "envs") $EnvName
 $PythonExe = Join-Path $EnvPrefix "python.exe"
 $Url = "http://${HostName}:${Port}"
@@ -121,7 +153,7 @@ function Ensure-PythonEnv {
 
     $check = @"
 import importlib
-for module in ["fastapi", "uvicorn", "sqlalchemy", "pydantic", "jwt"]:
+for module in ["fastapi", "uvicorn", "sqlalchemy", "pydantic", "jwt", "cryptography"]:
     importlib.import_module(module)
 print("ok")
 "@

@@ -47,6 +47,9 @@ class DashScopeEmbeddingProvider:
         return matrix
 
     def _embed_batch_once(self, texts: list[str]) -> list[np.ndarray]:
+        api_key = get_api_key() or self.api_key
+        if not api_key:
+            raise EmbeddingProviderError("DASHSCOPE_API_KEY is required for embedding requests")
         # DashScope native API format
         payload: dict[str, Any] = {
             "model": self.model,
@@ -56,7 +59,7 @@ class DashScopeEmbeddingProvider:
         }
         # Complete URL: base + /text-embedding/text-embedding
         url = self.base_url.rstrip("/") + "/text-embedding/text-embedding"
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         try:
             response = httpx.post(url, headers=headers, json=payload, timeout=self.timeout_seconds)
             response.raise_for_status()
@@ -93,12 +96,14 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
             )
         # Base URL without /text-embedding, that gets appended in _embed_batch_once
         base_url = "https://dashscope.aliyuncs.com/api/v1/services/embeddings"
+        # text-embedding-v3/v4 allow at most 10 texts per request.
+        batch_size = min(settings.vector_batch_size, 10)
         return DashScopeEmbeddingProvider(
             api_key=api_key,
             model=settings.vector_embedding_model,
             base_url=base_url,
             dimension=settings.vector_dimension,
-            batch_size=settings.vector_batch_size,
+            batch_size=batch_size,
             timeout_seconds=settings.request_timeout_seconds,
         )
     raise EmbeddingProviderError(f"unsupported embedding provider: {settings.vector_embedding_provider}")

@@ -1,0 +1,44 @@
+# Lightweight intent hints for retrieval and tool routing (product engineering, not competition tuning).
+intents:
+  - id: financial_metrics
+    name: 财务指标与计算
+    keywords:
+      - 营业收入
+      - 净利润
+      - 现金流
+      - 同比
+      - 环比
+      - 占比
+      - 增长率
+      - 毛利率
+      - 净资产
+    tools:
+      - calculator
+    domains:
+      - financial_reports
+    dense_evidence: true
+
+  - id: regulatory_clause
+    name: 法规与条款
+    keywords:
+      - 保险责任
+      - 免责
+      - 条款
+      - 法规
+      - 第
+      - 条规定
+    tools: []
+    domains:
+      - insurance
+      - regulations
+
+  - id: document_summary
+    name: 文档摘要
+    keywords:
+      - 总结
+      - 概述
+      - 主要内容
+      - 摘要
+      - 归纳
+    tools: []
+    domains: []

@@ -651,14 +651,12 @@ const selectedKnowledgeBase = computed(() => {
 // Manual RAG modes available based on KB capabilities, plus llm_only as the last option.
 const effectiveQueryModeOptions = computed(() => {
   const kb = selectedKnowledgeBase.value
-  const enabledLocal = Boolean(kb?.enable_local)
   const enabledNaive = kb ? Boolean(kb.enable_naive_rag) : true
   const enabledBm25 = Boolean(kb?.enable_bm25)
 
   const modes = queryModeOptions.filter((opt) => {
     if (opt.value === 'naive') return enabledNaive
     if (opt.value === 'bm25') return enabledBm25
-    if (opt.value === 'local' || opt.value === 'global' || opt.value === 'global_local') return enabledLocal
     return true
   })
   modes.push({ label: '模型直答', value: 'llm_only' })
@@ -928,7 +926,8 @@ const handleSendQuestion = async () => {
         sources: [],
         retrieval_summary: null,
         created_at: new Date().toISOString(),
-        streaming: true
+        streaming: true,
+        streamStatus: null
       }
     ]
     draftQuestion.value = ''
@@ -965,9 +964,18 @@ const handleSendQuestion = async () => {
           // If user clicked stop, never append any more chunks to this turn.
           if (streamController.signal.aborted) return
           if (activeStreamTurnId.value !== streamingTurnId) return
+          if (event.status) {
+            updateLocalStreamingTurn(streamingTurnId, (turnItem) => ({
+              ...turnItem,
+              streamStatus: event.status
+            }))
+            scrollConversationToBottomThrottled()
+            return
+          }
           if (!event.content) return
           updateLocalStreamingTurn(streamingTurnId, (turnItem) => ({
             ...turnItem,
+            streamStatus: null,
             answer: `${turnItem.answer || ''}${event.content}`
           }))
           scrollConversationToBottomThrottled()
@@ -977,7 +985,7 @@ const handleSendQuestion = async () => {
 
     // If user stopped generation, do not let a late `done` overwrite the partial content.
     if (streamController.signal.aborted || activeStreamTurnId.value !== streamingTurnId) {
-      updateLocalStreamingTurn(streamingTurnId, (t) => ({ ...t, answer: t.answer || '已停止生成', streaming: false }))
+      updateLocalStreamingTurn(streamingTurnId, (t) => ({ ...t, answer: t.answer || '已停止生成', streaming: false, streamStatus: null }))
       return
     }
 
@@ -991,7 +999,8 @@ const handleSendQuestion = async () => {
       sources: finalPayload?.sources || turnItem.sources,
       memory: finalPayload?.metadata?.memory || turnItem.memory,
       retrieval_summary: finalPayload?.metadata?.retrieval || turnItem.retrieval_summary,
-      streaming: false
+      streaming: false,
+      streamStatus: null
     }))
     // 产品化失败态：英文拒答/空答 => 结构化中文提示 + 可重试
     updateLocalStreamingTurn(streamingTurnId, (turnItem) => {
@@ -1022,10 +1031,10 @@ const handleSendQuestion = async () => {
     }
   } catch (error) {
     if (streamController.signal.aborted) {
-      updateLocalStreamingTurn(streamingTurnId, (t) => ({ ...t, answer: t.answer || '已停止生成', streaming: false }))
+      updateLocalStreamingTurn(streamingTurnId, (t) => ({ ...t, answer: t.answer || '已停止生成', streaming: false, streamStatus: null }))
       return
     }
-    updateLocalStreamingTurn(streamingTurnId, (t) => ({ ...t, streaming: false }))
+    updateLocalStreamingTurn(streamingTurnId, (t) => ({ ...t, streaming: false, streamStatus: null }))
     if (!error.response?.data?.detail && error.message) {
       message.error(error.message)
       return
@@ -2452,11 +2461,25 @@ onBeforeUnmount(() => { abortActiveStream() })
 }
 
 /* Thinking indicator */
-:deep(.thinking-indicator) {
+:deep(.thinking-indicator),
+:deep(.stream-status__dots) {
   display: flex;
   align-items: center;
   gap: 5px;
   padding: 6px 0;
+}
+
+:deep(.stream-status) {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  color: var(--text-4);
+  font-size: 13px;
+}
+
+:deep(.stream-status__label) {
+  font-weight: 500;
 }
 
 :deep(.thinking-dot) {

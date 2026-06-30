@@ -1,9 +1,10 @@
-"""Test knowledge base isolation."""
+"""Tests for knowledge base isolation (requires PostgreSQL)."""
 
 import os
-from pathlib import Path
 
 import pytest
+
+pytest.importorskip("psycopg")
 
 from finlongrag.core.config import Settings
 from finlongrag.storage.knowledge_repository import create_knowledge_repository
@@ -22,6 +23,7 @@ def repository(test_settings):
     return create_knowledge_repository(test_settings.database_url)
 
 
+@pytest.mark.integration
 def test_index_version_isolation(repository):
     """Test that index versions are isolated by knowledge base."""
     # Create two knowledge bases
@@ -80,6 +82,7 @@ def test_index_version_isolation(repository):
     repository.delete_knowledge_base(kb2.kb_id)
 
 
+@pytest.mark.integration
 def test_knowledge_base_delete_cascade(repository):
     """Test that deleting a knowledge base cascades to related records."""
     # Create knowledge base

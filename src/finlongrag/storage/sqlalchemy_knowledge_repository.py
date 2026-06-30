@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 
 from finlongrag.core.schema import Chunk
 from finlongrag.db import get_sync_sessionmaker
@@ -15,6 +15,7 @@ from finlongrag.db.models.knowledge import (
     IngestionTask,
     KnowledgeBase,
     KnowledgeChunk,
+    KnowledgeChunkLog,
     KnowledgeDocument,
 )
 from finlongrag.storage.knowledge_repository import (
@@ -63,9 +64,14 @@ class SQLAlchemyKnowledgeRepository:
                 .order_by(KnowledgeBase.updated_at.desc())
                 .limit(limit)
             )
-            # 用户隔离：只返回该用户创建的知识库
+            # 用户隔离：只返回该用户创建的知识库（兼容旧数据 metadata.owner_id）
             if user_id:
-                stmt = stmt.where(KnowledgeBase.created_by == user_id)
+                stmt = stmt.where(
+                    or_(
+                        KnowledgeBase.created_by == user_id,
+                        KnowledgeBase.metadata_json["owner_id"].as_string() == user_id,
+                    )
+                )
 
             rows = session.scalars(stmt).all()
             return [_kb_from_model(row) for row in rows]
@@ -75,9 +81,11 @@ class SQLAlchemyKnowledgeRepository:
             row = session.get(KnowledgeBase, kb_id)
             if row is None or row.deleted_at is not None:
                 return None
-            # 用户隔离：只允许访问自己创建的知识库
+            # 用户隔离：只允许访问自己创建的知识库（兼容旧数据 metadata.owner_id）
             if user_id and row.created_by != user_id:
-                return None
+                owner_id = (row.metadata_json or {}).get("owner_id")
+                if owner_id != user_id:
+                    return None
             return _kb_from_model(row)
 
     def delete_knowledge_base(self, kb_id: str) -> bool:
@@ -85,6 +93,14 @@ class SQLAlchemyKnowledgeRepository:
             row = session.get(KnowledgeBase, kb_id)
             if row is None:
                 return False
+
+            document_ids = session.scalars(
+                select(KnowledgeDocument.document_id).where(KnowledgeDocument.kb_id == kb_id)
+            ).all()
+            if document_ids:
+                session.execute(
+                    delete(KnowledgeChunkLog).where(KnowledgeChunkLog.document_id.in_(document_ids))
+                )
 
             # Delete chunks first (foreign key constraint)
             session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.kb_id == kb_id))
@@ -179,6 +195,8 @@ class SQLAlchemyKnowledgeRepository:
                 return None
             record = _document_from_model(row)
 
+            session.execute(delete(KnowledgeChunkLog).where(KnowledgeChunkLog.document_id == document_id))
+
             # Delete all chunks belonging to this document
             session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document_id))
 
@@ -245,7 +263,11 @@ class SQLAlchemyKnowledgeRepository:
             session.commit()
 
     def load_chunks(self, kb_id: str | None = None) -> list[Chunk]:
-        stmt = select(KnowledgeChunk)
+        stmt = (
+            select(KnowledgeChunk)
+            .join(KnowledgeDocument, KnowledgeChunk.document_id == KnowledgeDocument.document_id)
+            .where(KnowledgeDocument.deleted_at.is_(None))
+        )
         if kb_id:
             stmt = stmt.where(KnowledgeChunk.kb_id == kb_id)
         stmt = stmt.order_by(KnowledgeChunk.doc_id, KnowledgeChunk.page, KnowledgeChunk.chunk_id)
@@ -363,10 +385,14 @@ class SQLAlchemyKnowledgeRepository:
     def activate_index_version(self, index_version_id: str) -> IndexVersionRecord:
         now = _now()
         with self._sessionmaker() as session:
-            row = session.get(IndexVersion, index_version_id)
+            row = session.get(IndexVersion, index_version_id, with_for_update=True)
             if row is None:
                 raise KeyError(f"index version not found: {index_version_id}")
-            # Only supersede index versions from the same knowledge base
+            session.execute(
+                select(IndexVersion)
+                .where(IndexVersion.kb_id == row.kb_id, IndexVersion.status == "active")
+                .with_for_update()
+            )
             session.execute(
                 update(IndexVersion)
                 .where(IndexVersion.status == "active", IndexVersion.kb_id == row.kb_id)

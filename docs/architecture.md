@@ -23,7 +23,7 @@ Frontend
 ```text
 Upload
   -> FileStorage
-  -> Parser
+  -> OpenDataLoader PDF (opendataloader-pdf, requires Java 11+)
   -> Structure-aware Chunker
   -> SQLAlchemyKnowledgeRepository
   -> PostgreSQL knowledge_chunks
@@ -31,6 +31,29 @@ Upload
   -> DashScopeEmbeddingProvider
   -> FAISS index.faiss + metadata.jsonl
 ```
+
+Agent 问答主链路（开放题 RAG）：
+
+```text
+Router (LLM) -> Planner
+  -> AgentRuntime (intent / budget / cache)
+  -> StepExecutor:
+       rewrite_query -> hybrid_retrieve -> conditional rerank -> select_evidence
+       -> assess_evidence -> generate_answer (+ numeric tools) -> validate_citations
+```
+
+入库编排：
+
+```text
+Upload -> IngestionPipeline(parse -> chunk) -> PostgreSQL -> build_indexes -> merge_global_indexes
+```
+
+说明：对话路由与结构化选择题仍走专用路径，未统一经过 StepExecutor；知识图谱能力暂未实现（API 返回 501，前端入口保留搁置）。
+
+## 搁置功能（暂不开发）
+
+- 知识图谱：`POST .../rebuild-graph`、`POST .../cleanup` 返回 501；`GET .../graph` 返回空数据
+- 前端图谱页面保留，对接上述 stub API
 
 ## 检索模块
 

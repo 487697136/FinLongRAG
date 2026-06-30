@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import delete, select
 
 from finlongrag.db import get_sync_sessionmaker
-from finlongrag.db.models.conversation import Conversation, Message
+from finlongrag.db.models.conversation import Conversation, ConversationSummary, Message, MessageFeedback
 from finlongrag.storage.repository import ConversationRecord, MessageRecord
 
 
@@ -114,6 +114,12 @@ class SQLAlchemyConversationRepository:
             conversation = session.get(Conversation, conversation_id)
             if conversation is None:
                 return False
+            message_ids = session.scalars(
+                select(Message.message_id).where(Message.conversation_id == conversation_id)
+            ).all()
+            if message_ids:
+                session.execute(delete(MessageFeedback).where(MessageFeedback.message_id.in_(message_ids)))
+            session.execute(delete(ConversationSummary).where(ConversationSummary.conversation_id == conversation_id))
             session.execute(delete(Message).where(Message.conversation_id == conversation_id))
             session.delete(conversation)
             session.commit()

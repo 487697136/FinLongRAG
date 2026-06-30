@@ -15,13 +15,24 @@ def test_router_and_planner_for_structured_question():
     route = AgentRouter().decide(question)
     plan = AgentPlanner().build(question, route)
 
-    assert route.route == RouteType.CLAIM_VERIFICATION
-    assert [step.action for step in plan.steps] == [
-        "decompose_claims",
-        "retrieve_claim_evidence",
-        "verify_claims",
-        "assemble_answer",
-        "self_check",
+    assert route.route == RouteType.STRUCTURED
+    assert [step.action for step in plan.steps] == ["claim_verification"]
+
+
+def test_rag_plan_matches_executor_handlers():
+    question = Question(qid="q2", question="文档主要内容是什么？", answer_format="open")
+    route = AgentRouter().decide(question)
+    plan = AgentPlanner().build(question, route)
+
+    assert route.route == RouteType.RAG
+    assert plan.step_actions() == [
+        "rewrite_query",
+        "hybrid_retrieve",
+        "rerank_evidence",
+        "select_evidence",
+        "assess_evidence",
+        "generate_answer",
+        "validate_citations",
     ]
 
 
@@ -56,4 +67,3 @@ def test_working_memory_keeps_high_signal_facts_after_compression():
 
     assert "营业收入" in summary
     assert len(memory.facts) <= 3
-

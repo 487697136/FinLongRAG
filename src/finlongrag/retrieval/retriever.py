@@ -64,6 +64,8 @@ class Retriever:
         fused_top_k: int | None = None,
         source: str = "claim_bm25f",
         metadata: dict | None = None,
+        bm25_weight: float | None = None,
+        faiss_weight: float | None = None,
     ) -> list[RetrievalResult]:
         return self._search_channels(
             Question(qid="retrieval", question=" ".join(queries), answer_format="open", metadata=metadata or {}),
@@ -72,16 +74,21 @@ class Retriever:
             top_k_per_query=top_k_per_query,
             fused_top_k=fused_top_k,
             source=source,
+            bm25_weight=bm25_weight,
+            faiss_weight=faiss_weight,
         )
 
     def candidate_doc_filter(self, question: Question, *, restrict_to_doc_ids: bool) -> set[str] | None:
         if restrict_to_doc_ids and question.doc_ids:
             return set(question.doc_ids)
         if self.doc_index:
+            metadata = question.metadata or {}
             doc_ids = self.doc_index.search_doc_ids(
                 question_with_options(question),
                 top_k=self.blind_top_docs,
                 domain=question.domain or None,
+                kb_id=metadata.get("kb_id"),
+                kb_ids=metadata.get("kb_ids"),
             )
             return set(doc_ids) if doc_ids else None
         return None
@@ -95,6 +102,8 @@ class Retriever:
         top_k_per_query: int | None = None,
         fused_top_k: int | None = None,
         source: str,
+        bm25_weight: float | None = None,
+        faiss_weight: float | None = None,
     ) -> list[RetrievalResult]:
         # Extract kb_id or kb_ids from question metadata
         kb_id = question.metadata.get("kb_id") if question.metadata else None
@@ -120,7 +129,13 @@ class Retriever:
         if len(ranked_lists) == 1:
             fused = ranked_lists[0][: fused_top_k or self.fused_top_k]
         else:
-            weights = [self.channel_weights.get(result.channel, 1.0) for result in channel_results if result.results]
+            # Allow per-call weight overrides without mutating self.channel_weights
+            effective_weights = {**self.channel_weights}
+            if bm25_weight is not None:
+                effective_weights["bm25f"] = bm25_weight
+            if faiss_weight is not None:
+                effective_weights["faiss"] = faiss_weight
+            weights = [effective_weights.get(result.channel, 1.0) for result in channel_results if result.results]
             fused = reciprocal_rank_fusion(ranked_lists, top_k=fused_top_k or self.fused_top_k, weights=weights)
 
         # Filter by kb_id (single KB) or kb_ids (multiple KBs)

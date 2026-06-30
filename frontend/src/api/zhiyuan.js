@@ -4,9 +4,6 @@ import { hardRedirectToLogin } from '@/api/redirect'
 
 export const queryModeOptions = [
   { label: '文档检索', value: 'naive' },
-  { label: '图谱局部检索', value: 'local' },
-  { label: '图谱全局分析', value: 'global' },
-  { label: '图谱混合检索', value: 'global_local' },
   { label: '关键词检索', value: 'bm25' }
 ]
 
