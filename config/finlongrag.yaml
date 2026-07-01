@@ -20,6 +20,7 @@ retrieval:
   vector_embedding_model: text-embedding-v4
   vector_dimension: 1024
   vector_batch_size: 10
+  vector_embedding_concurrency: 2
   vector_store: faiss
   bm25_channel_weight: 1.0
   vector_channel_weight: 0.65

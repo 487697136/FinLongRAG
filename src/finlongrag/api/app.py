@@ -38,11 +38,27 @@ class SPAStaticFiles(StaticFiles):
 
     async def get_response(self, path: str, scope):
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             if exc.status_code == 404 and "." not in path:
-                return await super().get_response("index.html", scope)
+                response = await super().get_response("index.html", scope)
+                _disable_frontend_cache(response)
+                return response
             raise
+        _disable_frontend_cache(response)
+        return response
+
+
+def _disable_frontend_cache(response) -> None:
+    """Avoid stale Vite chunks after local rebuilds.
+
+    The app is usually served from a freshly rebuilt local dist directory. If a
+    browser keeps an older entry chunk, it can request chunk filenames that no
+    longer exist and produce a cascade of 404s.
+    """
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
 
 
 def create_app(*, dry_run: bool = False) -> FastAPI:

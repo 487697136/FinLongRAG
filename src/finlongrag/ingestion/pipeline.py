@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
 from finlongrag.core.config import Settings
@@ -57,11 +58,16 @@ class IngestionPipeline:
             document=document,
         )
         for stage in self.stages:
+            started = perf_counter()
             try:
                 stage.handler(ctx)
+                duration_ms = int((perf_counter() - started) * 1000)
+                ctx.record(f"{stage.name}_timing", duration_ms=duration_ms)
                 if ctx.error:
                     break
             except Exception as exc:
+                duration_ms = int((perf_counter() - started) * 1000)
+                ctx.record(f"{stage.name}_timing", duration_ms=duration_ms, failed=True)
                 ctx.error = f"{stage.name}: {exc}"
                 logger.exception("Ingestion stage %s failed for document %s", stage.name, document_id)
                 break

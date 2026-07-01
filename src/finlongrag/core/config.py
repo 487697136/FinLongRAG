@@ -92,6 +92,7 @@ class Settings:
     vector_embedding_model: str = "text-embedding-v4"
     vector_dimension: int = 1024
     vector_batch_size: int = 10
+    vector_embedding_concurrency: int = 2
     vector_store: str = "faiss"
     bm25_channel_weight: float = 1.0
     vector_channel_weight: float = 0.45
@@ -170,6 +171,12 @@ class Settings:
                 _env(
                     "FINLONGRAG_VECTOR_BATCH_SIZE",
                     str(_nested(data, "retrieval.vector_batch_size", cls.vector_batch_size)),
+                )
+            ),
+            vector_embedding_concurrency=int(
+                _env(
+                    "FINLONGRAG_VECTOR_EMBEDDING_CONCURRENCY",
+                    str(_nested(data, "retrieval.vector_embedding_concurrency", cls.vector_embedding_concurrency)),
                 )
             ),
             vector_store=_env("FINLONGRAG_VECTOR_STORE", str(_nested(data, "retrieval.vector_store", cls.vector_store))),

@@ -20,7 +20,7 @@ function Find-CondaExe {
         return $Preferred
     }
     $candidates = @(
-        "D:\Anaconda3\Scripts\conda.exe",
+        "E:\Anaconda3\Scripts\conda.exe",
         "D:\Anaconda3\Scripts\conda.exe",
         "$env:USERPROFILE\anaconda3\Scripts\conda.exe",
         "$env:USERPROFILE\miniconda3\Scripts\conda.exe",
@@ -206,10 +206,12 @@ print("ok")
 
 function Ensure-JavaRuntime {
     $javaCandidates = @(
+        "E:\Apps\Java\jdk-11",
         "D:\Apps\Java\jdk-11",
         "C:\Program Files\Java\jdk-11",
         $env:JAVA11_HOME,
         $env:JAVA_HOME,
+        "E:\java_JDK\OpenJDK17U-jdk_x64_windows_hotspot_17.0.17_10\jdk-17.0.17+10",
         "D:\java_JDK\OpenJDK17U-jdk_x64_windows_hotspot_17.0.17_10\jdk-17.0.17+10"
     ) | Where-Object {
         if (-not $_) { return $false }
@@ -227,7 +229,7 @@ function Ensure-JavaRuntime {
             if ($major -eq 1 -and $matches[2]) { $major = [int]$matches[2] }
             if ($major -ge 11) {
                 $env:JAVA_HOME = $candidate
-                $env:JAVA11_HOME = if (Test-Path -LiteralPath "C:\Program Files\Java\jdk-11") { "C:\Program Files\Java\jdk-11" } elseif (Test-Path -LiteralPath "D:\Apps\Java\jdk-11") { "D:\Apps\Java\jdk-11" } else { $candidate }
+                $env:JAVA11_HOME = if (Test-Path -LiteralPath "E:\Apps\Java\jdk-11") { "E:\Apps\Java\jdk-11" } elseif (Test-Path -LiteralPath "C:\Program Files\Java\jdk-11") { "C:\Program Files\Java\jdk-11" } elseif (Test-Path -LiteralPath "D:\Apps\Java\jdk-11") { "D:\Apps\Java\jdk-11" } else { $candidate }
                 $env:Path = "$(Join-Path $candidate "bin");$env:Path"
                 Write-Step "Using Java $major from $candidate."
                 return
@@ -235,7 +237,7 @@ function Ensure-JavaRuntime {
         }
     }
 
-    throw "Java 11+ is required for opendataloader-pdf. Install it under C:\Program Files\Java\jdk-11 or set JAVA_HOME."
+    throw "Java 11+ is required for opendataloader-pdf. Install it under E:\Apps\Java\jdk-11, D:\Apps\Java\jdk-11, C:\Program Files\Java\jdk-11, or set JAVA_HOME."
 }
 
 function Get-JavaVersionText {

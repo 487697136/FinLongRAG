@@ -130,18 +130,88 @@ def create_v1_router(
         build_index: bool = True,
         document_ids: list[str] | None = None,
         force: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         task = knowledge_service_provider().create_ingestion_task(
             kb_id,
             build_index=build_index,
             status="queued",
             stage="queued",
-            metadata={"execution_mode": "local_thread"},
+            metadata={"execution_mode": "local_thread", **(metadata or {})},
             document_ids=document_ids,
             force=force,
         )
         executor.submit(task.task_id, run_ingestion_task, task.task_id, build_index=build_index)
         return task.to_dict()
+
+    async def register_uploaded_document(
+        *,
+        kb_id: str,
+        file: UploadFile,
+        user_id: str,
+        submit: bool = True,
+    ) -> tuple[KnowledgeDocumentRecord, bool, dict[str, Any] | None]:
+        settings = settings_provider()
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="Uploaded file must have a filename.")
+        try:
+            validate_upload_filename(file.filename, settings.upload_allowed_extensions)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        upload_started = perf_counter()
+        try:
+            payload_bytes = await read_upload_limited(file, settings.upload_max_bytes)
+        except UploadTooLargeError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+
+        upload_dir = settings.object_storage_root / "uploads" / kb_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = f"{uuid.uuid4().hex}_{Path(file.filename).name}"
+        target = upload_dir / safe_name
+        target.write_bytes(payload_bytes)
+        upload_duration_ms = int((perf_counter() - upload_started) * 1000)
+        content_hash = hashlib.sha256(payload_bytes).hexdigest()
+        upload_metadata = {
+            "uploaded_filename": file.filename,
+            "owner_id": user_id,
+            "file_size": len(payload_bytes),
+            "upload_duration_ms": upload_duration_ms,
+            "upload_progress": 100,
+        }
+        try:
+            for existing in knowledge_service_provider().list_documents(kb_id, limit=10000):
+                if existing.content_hash == content_hash:
+                    target.unlink(missing_ok=True)
+                    needs_reparse = existing.status not in {"chunked", "indexed"}
+                    task_info = None
+                    if submit and needs_reparse:
+                        task_info = submit_ingestion(
+                            kb_id,
+                            build_index=True,
+                            document_ids=[existing.document_id],
+                            force=needs_reparse,
+                            metadata={"source": "single_upload", "deduplicated": True},
+                        )
+                    return existing, False, task_info
+            doc = knowledge_service_provider().register_local_document(
+                kb_id=kb_id,
+                path=target,
+                title=Path(file.filename).stem,
+                metadata=upload_metadata,
+            )
+            task_info = None
+            if submit:
+                task_info = submit_ingestion(
+                    kb_id,
+                    build_index=True,
+                    document_ids=[doc.document_id],
+                    metadata={"source": "single_upload"},
+                )
+        except Exception as exc:
+            target.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return doc, True, task_info
 
     @router.post("/auth/register", status_code=status.HTTP_201_CREATED)
     def register(payload: RegisterRequest) -> dict[str, Any]:
@@ -468,47 +538,61 @@ def create_v1_router(
         user: User = Depends(current_user),
     ) -> dict[str, Any]:
         # 所属权检查：只能上传到自己的知识库
-        settings = settings_provider()
         get_user_kb(knowledge_service_provider(), kb_id, user.id)
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="Uploaded file must have a filename.")
-        try:
-            validate_upload_filename(file.filename, settings.upload_allowed_extensions)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        try:
-            payload_bytes = await read_upload_limited(file, settings.upload_max_bytes)
-        except UploadTooLargeError as exc:
-            raise HTTPException(status_code=413, detail=str(exc)) from exc
-        upload_dir = settings.object_storage_root / "uploads" / kb_id
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = f"{uuid.uuid4().hex}_{Path(file.filename).name}"
-        target = upload_dir / safe_name
-        target.write_bytes(payload_bytes)
-        content_hash = hashlib.sha256(payload_bytes).hexdigest()
-        try:
-            for existing in knowledge_service_provider().list_documents(kb_id, limit=10000):
-                if existing.content_hash == content_hash:
-                    target.unlink(missing_ok=True)
-                    needs_reparse = existing.status not in {"chunked", "indexed"}
-                    submit_ingestion(
-                        kb_id,
-                        build_index=True,
-                        document_ids=[existing.document_id],
-                        force=needs_reparse,
-                    )
-                    return _document_payload(existing)
-            doc = knowledge_service_provider().register_local_document(
+        doc, created, task_info = await register_uploaded_document(kb_id=kb_id, file=file, user_id=user.id)
+        return {**_document_payload(doc), "created": created, "task": task_info}
+
+    @router.post("/documents/batch-upload", status_code=status.HTTP_201_CREATED)
+    async def batch_upload_documents(
+        kb_id: str = Form(...),
+        files: list[UploadFile] = File(...),
+        user: User = Depends(current_user),
+    ) -> dict[str, Any]:
+        get_user_kb(knowledge_service_provider(), kb_id, user.id)
+        if not files:
+            raise HTTPException(status_code=400, detail="At least one file is required.")
+
+        documents: list[KnowledgeDocumentRecord] = []
+        created_document_ids: list[str] = []
+        deduplicated_document_ids: list[str] = []
+        process_document_ids: list[str] = []
+        for file in files:
+            doc, created, _ = await register_uploaded_document(
                 kb_id=kb_id,
-                path=target,
-                title=Path(file.filename).stem,
-                metadata={"uploaded_filename": file.filename, "owner_id": user.id},
+                file=file,
+                user_id=user.id,
+                submit=False,
             )
-            submit_ingestion(kb_id, build_index=True, document_ids=[doc.document_id])
-        except Exception as exc:
-            target.unlink(missing_ok=True)
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _document_payload(doc)
+            documents.append(doc)
+            if created:
+                created_document_ids.append(doc.document_id)
+                process_document_ids.append(doc.document_id)
+            else:
+                deduplicated_document_ids.append(doc.document_id)
+                if doc.status not in {"chunked", "indexed"}:
+                    process_document_ids.append(doc.document_id)
+
+        task_info = None
+        if process_document_ids:
+            task_info = submit_ingestion(
+                kb_id,
+                build_index=True,
+                document_ids=process_document_ids,
+                force=bool(deduplicated_document_ids),
+                metadata={
+                    "source": "batch_upload",
+                    "batch_size": len(files),
+                    "created_document_ids": created_document_ids,
+                    "deduplicated_document_ids": deduplicated_document_ids,
+                },
+            )
+        return {
+            "kb_id": kb_id,
+            "task": task_info,
+            "documents": [_document_payload(doc) for doc in documents],
+            "created_count": len(created_document_ids),
+            "deduplicated_count": len(deduplicated_document_ids),
+        }
 
     @router.delete("/documents/{document_id}")
     def delete_document(document_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
@@ -570,13 +654,20 @@ def create_v1_router(
             "indexed": 100,
             "failed": 100,
         }
+        progress = doc.metadata.get("processing_progress")
+        if progress is None:
+            progress = progress_map.get(doc.status, 10)
         return {
             "document_id": doc.document_id,
             "status": _document_status_for_frontend(doc.status),
             "raw_status": doc.status,
-            "progress": progress_map.get(doc.status, 10),
-            "progress_stage": doc.status,
+            "progress": progress,
+            "progress_stage": doc.metadata.get("processing_stage") or doc.status,
             "error_message": doc.error,
+            "upload_duration_ms": doc.metadata.get("upload_duration_ms", 0),
+            "processing_duration_ms": doc.metadata.get("processing_duration_ms", 0),
+            "stage_timings": doc.metadata.get("stage_timings", {}),
+            "last_ingestion_task_id": doc.metadata.get("last_ingestion_task_id", ""),
         }
 
     @router.post("/query/stream")
@@ -995,6 +1086,9 @@ def _kb_payload(kb, service: KnowledgeService) -> dict[str, Any]:
 
 
 def _document_payload(doc: KnowledgeDocumentRecord) -> dict[str, Any]:
+    progress = doc.metadata.get("processing_progress")
+    if progress is None:
+        progress = {"registered": 5, "parsing": 25, "chunked": 65, "indexed": 100, "failed": 100}.get(doc.status, 10)
     return {
         "id": doc.document_id,
         "document_id": doc.document_id,
@@ -1013,8 +1107,12 @@ def _document_payload(doc: KnowledgeDocumentRecord) -> dict[str, Any]:
         "error_message": doc.error,
         "created_at": _unix_to_iso(doc.created_at),
         "updated_at": _unix_to_iso(doc.updated_at),
-        "progress": {"registered": 5, "parsing": 25, "chunked": 65, "indexed": 100, "failed": 100}.get(doc.status, 10),
-        "progress_stage": doc.status,
+        "progress": progress,
+        "progress_stage": doc.metadata.get("processing_stage") or doc.status,
+        "upload_duration_ms": doc.metadata.get("upload_duration_ms", 0),
+        "processing_duration_ms": doc.metadata.get("processing_duration_ms", 0),
+        "stage_timings": doc.metadata.get("stage_timings", {}),
+        "last_ingestion_task_id": doc.metadata.get("last_ingestion_task_id", ""),
     }
 
 

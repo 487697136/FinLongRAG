@@ -3,13 +3,27 @@
     <PageHeader title="文档资产" description="集中管理金融资料上传、处理状态与失败恢复，确保知识库中的证据始终可追溯、可检索。">
       <template #actions>
         <n-space>
-          <input ref="fileInputRef" type="file" class="visually-hidden" accept=".txt,.md,.json,.csv,.pdf,.xlsx,.html,.htm" @change="handleFileSelected" />
+          <input ref="fileInputRef" type="file" class="visually-hidden" accept=".txt,.md,.json,.csv,.pdf,.xlsx,.html,.htm" multiple @change="handleFileSelected" />
           <n-button type="primary" :loading="uploading" @click="handleUploadDocument">
             {{ uploading ? '上传中...' : '上传文档' }}
           </n-button>
         </n-space>
       </template>
     </PageHeader>
+
+    <div v-if="uploading" class="upload-progress-panel">
+      <div class="upload-progress-panel__meta">
+        <strong>{{ uploadProgressLabel }}</strong>
+        <span>{{ uploadProgress.percentage }}%</span>
+      </div>
+      <n-progress
+        :percentage="uploadProgress.percentage"
+        :height="6"
+        :border-radius="3"
+        :show-indicator="false"
+        status="info"
+      />
+    </div>
 
     <div class="documents-overview-grid">
       <InfoCard label="已完成" :value="completedCount" caption="已完成解析并可作为问答证据使用的文档" tone="info" />
@@ -58,6 +72,8 @@
             <div class="detail-meta-item"><span>文件大小</span><strong>{{ formatBytes(selectedDocumentRecord.file_size) }}</strong></div>
             <div class="detail-meta-item"><span>处理状态</span><strong>{{ formatDocumentStatus(selectedDocumentRecord.status) }}</strong></div>
             <div class="detail-meta-item"><span>切块数量</span><strong>{{ selectedDocumentRecord.chunk_count || 0 }}</strong></div>
+            <div class="detail-meta-item"><span>上传耗时</span><strong>{{ formatDuration(selectedDocumentRecord.upload_duration_ms) }}</strong></div>
+            <div class="detail-meta-item"><span>处理耗时</span><strong>{{ formatDuration(selectedDocumentRecord.processing_duration_ms) }}</strong></div>
             <div class="detail-meta-item detail-meta-item--full"><span>错误信息</span><strong>{{ selectedDocumentRecord.error_message || '无' }}</strong></div>
             <div class="detail-meta-item"><span>创建时间</span><strong>{{ formatDateTime(selectedDocumentRecord.created_at) }}</strong></div>
             <div class="detail-meta-item"><span>更新时间</span><strong>{{ formatDateTime(selectedDocumentRecord.updated_at) }}</strong></div>
@@ -105,7 +121,7 @@ import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NDataTable, NDrawer, NDrawerContent, NModal, NProgress, NSpace, NInput, NSelect, NSpin, useMessage } from 'naive-ui'
 import { EyeOutline, RefreshOutline, TrashOutline } from '@vicons/ionicons5'
-import { deleteDocument, getDocumentProgress, listDocumentsByKnowledgeBase, reprocessDocument, uploadDocument } from '@/api/api'
+import { deleteDocument, getDocumentProgress, listDocumentsByKnowledgeBase, reprocessDocument, uploadDocument, uploadDocumentsBatch } from '@/api/api'
 import AppEmpty from '@/components/common/AppEmpty.vue'
 import DetailPanel from '@/components/common/DetailPanel.vue'
 import FilterToolbar from '@/components/common/FilterToolbar.vue'
@@ -123,6 +139,7 @@ const loading = ref(false)
 const uploading = ref(false)
 const deleting = ref(false)
 const fileInputRef = ref(null)
+const uploadProgress = ref({ loaded: 0, total: 0, percentage: 0, fileCount: 0 })
 const documentRecordList = ref([])
 const searchKeyword = ref('')
 const selectedKnowledgeBaseId = ref(route.query.kb ? String(route.query.kb) : 'all')
@@ -152,6 +169,10 @@ const completedCount = computed(() => documentRecordList.value.filter((item) => 
 const processingCount = computed(() => documentRecordList.value.filter((item) => ['processing', 'pending'].includes(item.status)).length)
 const failedCount = computed(() => documentRecordList.value.filter((item) => item.status === 'failed').length)
 const selectedKnowledgeBaseName = computed(() => kbStore.list.find((item) => String(item.id) === selectedKnowledgeBaseId.value)?.name || '')
+const uploadProgressLabel = computed(() => {
+  const count = uploadProgress.value.fileCount || 1
+  return count > 1 ? `正在上传 ${count} 个文档` : '正在上传文档'
+})
 
 const documentTabs = computed(() => [
   { label: '全部', value: 'all', count: documentRecordList.value.length },
@@ -213,6 +234,9 @@ async function pollProcessingProgress() {
         if (!target) return
         target.progress = prog.progress ?? 0
         target.progress_stage = prog.progress_stage ?? ''
+        target.processing_duration_ms = prog.processing_duration_ms ?? target.processing_duration_ms
+        target.stage_timings = prog.stage_timings ?? target.stage_timings
+        target.last_ingestion_task_id = prog.last_ingestion_task_id ?? target.last_ingestion_task_id
         if (prog.status !== target.status) {
           target.status = prog.status
           target.error_message = prog.error_message
@@ -256,14 +280,35 @@ function handleUploadDocument() {
 }
 
 async function handleFileSelected(event) {
-  const file = event.target.files?.[0]
-  if (!file) return
+  const files = Array.from(event.target.files || [])
+  if (!files.length) return
   uploading.value = true
-  const loadingMsg = message.loading(`正在上传「${file.name}」...`, { duration: 0 })
+  uploadProgress.value = {
+    loaded: 0,
+    total: files.reduce((sum, file) => sum + (file.size || 0), 0),
+    percentage: 0,
+    fileCount: files.length
+  }
+  const onUploadProgress = (progressEvent) => {
+    const total = progressEvent.total || uploadProgress.value.total || 0
+    const loaded = progressEvent.loaded || 0
+    uploadProgress.value = {
+      ...uploadProgress.value,
+      loaded,
+      total,
+      percentage: total > 0 ? Math.min(99, Math.round((loaded / total) * 100)) : uploadProgress.value.percentage
+    }
+  }
+  const loadingMsg = message.loading(files.length > 1 ? `正在上传 ${files.length} 个文档...` : `正在上传「${files[0].name}」...`, { duration: 0 })
   try {
-    await uploadDocument(selectedKnowledgeBaseId.value, file)
+    if (files.length > 1) {
+      await uploadDocumentsBatch(selectedKnowledgeBaseId.value, files, { onUploadProgress })
+    } else {
+      await uploadDocument(selectedKnowledgeBaseId.value, files[0], { onUploadProgress })
+    }
+    uploadProgress.value = { ...uploadProgress.value, percentage: 100 }
     loadingMsg.destroy()
-    message.success('文档已提交，系统正在处理（页面将自动刷新状态）')
+    message.success(files.length > 1 ? '文档批量提交成功，系统正在统一处理' : '文档已提交，系统正在处理（页面将自动刷新状态）')
     kbStore.invalidate()
     await loadDocuments()
   } catch (error) {
@@ -271,6 +316,7 @@ async function handleFileSelected(event) {
     message.error(error.response?.data?.detail || '上传文档失败')
   } finally {
     uploading.value = false
+    uploadProgress.value = { loaded: 0, total: 0, percentage: 0, fileCount: 0 }
     event.target.value = ''
   }
 }
@@ -293,6 +339,17 @@ async function handleReprocessDocument(documentId) {
 function confirmDeleteDocument(doc) {
   pendingDeleteDoc.value = doc
   showDeleteConfirm.value = true
+}
+
+function formatDuration(value) {
+  const ms = Number(value || 0)
+  if (!ms) return '--'
+  if (ms < 1000) return `${ms}ms`
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const rest = seconds % 60
+  return rest ? `${minutes}m ${rest}s` : `${minutes}m`
 }
 
 async function handleDeleteDocument() {
@@ -368,6 +425,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .documents-overview-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+.upload-progress-panel { margin-bottom:16px; padding:12px 14px; border:1px solid var(--border-color); border-radius:8px; background:var(--surface-card); }
+.upload-progress-panel__meta { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; color:var(--text-2); font-size:13px; }
+.upload-progress-panel__meta strong { color:var(--text-1); font-size:14px; }
 .toolbar-summary { display:flex; flex-wrap:wrap; gap:16px; color:var(--text-4); font-size:13px; align-items:center; }
 .toolbar-summary__polling { display:inline-flex; align-items:center; gap:6px; color:var(--brand-600); font-size:12px; }
 .detail-meta-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }

@@ -55,14 +55,30 @@ export async function listDocumentsByKnowledgeBase(kbId, params = {}) {
   return response.data
 }
 
-export async function uploadDocument(kbId, file) {
+export async function uploadDocument(kbId, file, options = {}) {
   const formData = new FormData()
   formData.append('kb_id', String(kbId))
   formData.append('file', file)
   const response = await api.post('/documents/upload', formData, {
     headers: {
       'Content-Type': 'multipart/form-data'
-    }
+    },
+    onUploadProgress: options.onUploadProgress
+  })
+  return response.data
+}
+
+export async function uploadDocumentsBatch(kbId, files, options = {}) {
+  const formData = new FormData()
+  formData.append('kb_id', String(kbId))
+  Array.from(files || []).forEach((file) => {
+    formData.append('files', file)
+  })
+  const response = await api.post('/documents/batch-upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    },
+    onUploadProgress: options.onUploadProgress
   })
   return response.data
 }

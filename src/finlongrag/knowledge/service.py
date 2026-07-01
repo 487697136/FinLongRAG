@@ -7,6 +7,8 @@ import shutil
 import uuid
 from dataclasses import replace
 from pathlib import Path
+from threading import Lock
+from time import perf_counter
 from typing import Any
 
 from finlongrag.core.config import Settings
@@ -24,6 +26,9 @@ from finlongrag.storage.knowledge_repository import (
     KnowledgeDocumentRecord,
     create_knowledge_repository,
 )
+
+_INDEX_LOCKS: dict[str, Lock] = {}
+_INDEX_LOCKS_GUARD = Lock()
 
 
 class KnowledgeService:
@@ -194,6 +199,9 @@ class KnowledgeService:
                 "build_index": build_index,
                 "document_ids": document_ids_filter,
                 "force": force,
+                "progress_current": 0,
+                "progress_total": len(documents),
+                "processing_stage": "started",
             },
         )
         if not all_documents:
@@ -215,6 +223,7 @@ class KnowledgeService:
         try:
             for document_record in documents:
                 current_document = document_record
+                document_started = perf_counter()
                 was_already_indexed = document_record.status in {"indexed", "chunked"}
                 if not force and not self._document_needs_ingestion(document_record):
                     skipped_documents += 1
@@ -250,7 +259,17 @@ class KnowledgeService:
                         metadata=_task_document_metadata(document_record),
                     )
                     continue
-                self.repository.update_document_state(document_record.document_id, status="parsing", error="")
+                self.repository.update_document_state(
+                    document_record.document_id,
+                    status="parsing",
+                    error="",
+                    metadata={
+                        "processing_progress": 20,
+                        "processing_stage": "parsing",
+                        "processing_started_at": perf_counter(),
+                        "last_ingestion_task_id": task.task_id,
+                    },
+                )
                 doc_for_parse = _document_from_record(document_record)
                 doc_for_parse = replace(doc_for_parse, path=str(resolved_doc_path))
                 pipeline = IngestionPipeline(self.settings)
@@ -273,6 +292,7 @@ class KnowledgeService:
                     reprocessed_doc_ids.append(document_record.document_id)
                 else:
                     newly_processed_doc_ids.append(document_record.document_id)
+                stage_timings = _stage_timings_from_reports(ingestion_ctx.stage_reports)
                 self.repository.update_document_state(
                     document_record.document_id,
                     status="chunked",
@@ -284,6 +304,10 @@ class KnowledgeService:
                         "page_count": len(ingestion_ctx.pages),
                         "ingestion_stages": ingestion_ctx.stage_reports,
                         "last_ingestion_task_id": task.task_id,
+                        "processing_progress": 70,
+                        "processing_stage": "chunked",
+                        "processing_duration_ms": int((perf_counter() - document_started) * 1000),
+                        "stage_timings": stage_timings,
                     },
                 )
                 self.repository.update_task(
@@ -291,7 +315,12 @@ class KnowledgeService:
                     stage="chunked",
                     processed_documents=processed_documents,
                     total_chunks=total_chunks,
-                    metadata=_task_document_metadata(document_record),
+                    metadata={
+                        **_task_document_metadata(document_record),
+                        "progress_current": processed_documents,
+                        "progress_total": len(documents),
+                        "processing_stage": "chunked",
+                    },
                 )
 
             index_info: dict[str, Any] = {}
@@ -301,13 +330,34 @@ class KnowledgeService:
                 or self.get_active_index_version(kb_id=task.kb_id) is None
             )
             if should_build_index:
+                index_started = perf_counter()
                 self.repository.update_task(
                     task.task_id,
                     stage="build_index",
                     processed_documents=processed_documents,
                     total_chunks=total_chunks,
-                    metadata={"current_document_id": "", "current_doc_id": ""},
+                    metadata={
+                        "current_document_id": "",
+                        "current_doc_id": "",
+                        "progress_current": processed_documents,
+                        "progress_total": len(documents),
+                        "processing_stage": "build_index",
+                    },
                 )
+                for document_record in all_documents:
+                    if document_record.status in {"chunked"} or document_record.document_id in {
+                        *newly_processed_doc_ids,
+                        *reprocessed_doc_ids,
+                    }:
+                        self.repository.update_document_state(
+                            document_record.document_id,
+                            status="chunked",
+                            metadata={
+                                "processing_progress": 90,
+                                "processing_stage": "build_index",
+                                "last_ingestion_task_id": task.task_id,
+                            },
+                        )
                 try:
                     index_info = self.build_indexes(
                         kb_id=task.kb_id,
@@ -317,12 +367,26 @@ class KnowledgeService:
                 except Exception:
                     index_stage_failed = True
                     raise
+                touched_doc_ids = {*newly_processed_doc_ids, *reprocessed_doc_ids}
                 for document_record in all_documents:
-                    if document_record.status in {"chunked", "indexed"} or document_record.document_id in {
-                        *newly_processed_doc_ids,
-                        *reprocessed_doc_ids,
-                    }:
-                        self.repository.update_document_state(document_record.document_id, status="indexed")
+                    current = self.repository.get_document(document_record.document_id)
+                    current_status = current.status if current else document_record.status
+                    if current_status == "chunked" or document_record.document_id in touched_doc_ids:
+                        stage_timings = dict((current.metadata if current else document_record.metadata).get("stage_timings") or {})
+                        index_ms = int((perf_counter() - index_started) * 1000)
+                        stage_timings["index_ms"] = index_ms
+                        previous_duration_ms = int((current.metadata if current else document_record.metadata).get("processing_duration_ms") or 0)
+                        self.repository.update_document_state(
+                            document_record.document_id,
+                            status="indexed",
+                            metadata={
+                                "processing_progress": 100,
+                                "processing_stage": "indexed",
+                                "processing_duration_ms": previous_duration_ms + index_ms,
+                                "stage_timings": stage_timings,
+                                "last_ingestion_task_id": task.task_id,
+                            },
+                        )
 
             if processed_documents == 0 and skipped_documents == 0 and not should_build_index:
                 return self.repository.update_task(
@@ -347,6 +411,9 @@ class KnowledgeService:
                     "skipped_documents": skipped_documents,
                     "newly_processed_document_ids": newly_processed_doc_ids,
                     "reprocessed_document_ids": reprocessed_doc_ids,
+                    "progress_current": processed_documents,
+                    "progress_total": len(documents),
+                    "processing_stage": "done",
                 },
             )
         except Exception as exc:
@@ -364,6 +431,11 @@ class KnowledgeService:
                     current_document.document_id,
                     status="failed",
                     error=str(exc),
+                    metadata={
+                        "processing_progress": 100,
+                        "processing_stage": "failed",
+                        "last_ingestion_task_id": task.task_id,
+                    },
                 )
             if raise_on_error:
                 raise
@@ -381,6 +453,20 @@ class KnowledgeService:
     ) -> dict[str, Any]:
         if not kb_id:
             raise ValueError("kb_id is required for managed index building")
+        with _kb_index_lock(kb_id):
+            return self._build_indexes_locked(
+                kb_id=kb_id,
+                incremental_document_ids=incremental_document_ids,
+                force_vector_rebuild=force_vector_rebuild,
+            )
+
+    def _build_indexes_locked(
+        self,
+        *,
+        kb_id: str,
+        incremental_document_ids: list[str] | None = None,
+        force_vector_rebuild: bool = False,
+    ) -> dict[str, Any]:
         self.get_knowledge_base(kb_id)
         chunks = self.repository.load_chunks(kb_id=kb_id)
         if not chunks:
@@ -609,9 +695,33 @@ def _task_document_metadata(record: KnowledgeDocumentRecord) -> dict[str, str]:
     }
 
 
+def _stage_timings_from_reports(reports: list[dict[str, Any]]) -> dict[str, int]:
+    timings: dict[str, int] = {}
+    for item in reports:
+        stage = str(item.get("stage") or "")
+        if not stage.endswith("_timing"):
+            continue
+        key = f"{stage[:-7]}_ms"
+        try:
+            timings[key] = int(item.get("duration_ms") or 0)
+        except (TypeError, ValueError):
+            timings[key] = 0
+    return timings
+
+
 def _sha256_file(path: Path) -> str:
     hasher = hashlib.sha256()
     with path.open("rb") as f:
         for block in iter(lambda: f.read(1024 * 1024), b""):
             hasher.update(block)
     return hasher.hexdigest()
+
+
+def _kb_index_lock(kb_id: str) -> Lock:
+    key = str(kb_id)
+    with _INDEX_LOCKS_GUARD:
+        lock = _INDEX_LOCKS.get(key)
+        if lock is None:
+            lock = Lock()
+            _INDEX_LOCKS[key] = lock
+        return lock

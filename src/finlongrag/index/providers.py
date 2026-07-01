@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,6 +27,7 @@ class DashScopeEmbeddingProvider:
     base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     dimension: int = 1024
     batch_size: int = 16
+    max_concurrency: int = 1
     name: str = "dashscope"
     timeout_seconds: int = 120
     max_retries: int = 2
@@ -39,8 +41,17 @@ class DashScopeEmbeddingProvider:
         if not cleaned:
             return np.zeros((0, self.dimension), dtype=np.float32)
         rows: list[np.ndarray] = []
-        for start in range(0, len(cleaned), max(1, self.batch_size)):
-            rows.extend(self._embed_batch_resilient(cleaned[start : start + self.batch_size]))
+        batches = [
+            cleaned[start : start + max(1, self.batch_size)]
+            for start in range(0, len(cleaned), max(1, self.batch_size))
+        ]
+        if self.max_concurrency <= 1 or len(batches) <= 1:
+            for batch in batches:
+                rows.extend(self._embed_batch_resilient(batch))
+        else:
+            with ThreadPoolExecutor(max_workers=min(self.max_concurrency, len(batches))) as executor:
+                for batch_rows in executor.map(self._embed_batch_resilient, batches):
+                    rows.extend(batch_rows)
         matrix = np.vstack(rows).astype(np.float32)
         if matrix.shape[1] != self.dimension:
             raise EmbeddingProviderError(
@@ -119,6 +130,7 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
             base_url=base_url,
             dimension=settings.vector_dimension,
             batch_size=batch_size,
+            max_concurrency=max(1, settings.vector_embedding_concurrency),
             timeout_seconds=settings.request_timeout_seconds,
             max_retries=settings.max_retries,
         )
