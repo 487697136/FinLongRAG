@@ -12,10 +12,10 @@
           class="chat-home__alert"
           title="暂无知识库"
         >
-          您可以使用<strong>「模型直答」</strong>模式直接进行对话；如需检索金融文档，请前往<strong>知识库</strong>创建并上传文档。
+          金融文档问答需要先前往<strong>知识库</strong>创建并上传文档；如只需普通对话，可选择<strong>「模型直答」</strong>。
         </n-alert>
         <n-alert
-          v-else-if="selectedKnowledgeBaseStats && !selectedKnowledgeBaseStats.initialized"
+          v-else-if="!useAutoMode && selectedAskMode !== 'llm_only' && selectedKnowledgeBaseStats && !selectedKnowledgeBaseStats.initialized"
           type="warning"
           class="chat-home__alert"
           title="当前知识库尚未初始化"
@@ -50,12 +50,44 @@
               <div class="chat-home__composer-selectors">
                 <!-- 知识库选择 -->
                 <n-select
+                  v-if="selectedAskMode !== 'llm_only' && !useAutoMode"
                   v-model:value="selectedKnowledgeBaseId"
                   :options="knowledgeBaseOptions"
-                  style="width: 220px; flex-shrink: 0"
+                  style="width: 190px; flex-shrink: 0"
                   placeholder="选择知识库"
                   size="small"
                   clearable
+                />
+                <n-select
+                  v-else-if="selectedAskMode !== 'llm_only'"
+                  v-model:value="selectedKnowledgeBaseIds"
+                  :options="knowledgeBaseOptions"
+                  style="width: 230px; flex-shrink: 0"
+                  placeholder="选择知识库（可多选）"
+                  size="small"
+                  multiple
+                  max-tag-count="responsive"
+                />
+
+                <div
+                  v-if="selectedAskMode !== 'llm_only'"
+                  class="mode-auto-switch"
+                  :class="{ 'mode-auto-switch--on': useAutoMode }"
+                  role="group"
+                  aria-label="多知识库融合"
+                >
+                  <div class="mode-auto-switch__text">
+                    <div class="mode-auto-switch__title">融合</div>
+                    <div class="mode-auto-switch__desc">{{ useAutoMode ? '多库融合' : '单库隔离' }}</div>
+                  </div>
+                  <n-switch v-model:value="useAutoMode" size="small" />
+                </div>
+
+                <n-select
+                  v-model:value="selectedAskMode"
+                  :options="effectiveQueryModeOptions"
+                  style="width: 120px; flex-shrink: 0"
+                  size="small"
                 />
 
                 <n-select
@@ -74,6 +106,17 @@
                   style="width: 190px; flex-shrink: 0"
                   size="small"
                   placeholder="模型"
+                />
+
+                <n-input-number
+                  v-if="selectedAskMode !== 'llm_only'"
+                  v-model:value="selectedTopK"
+                  :min="1"
+                  :max="50"
+                  :show-button="false"
+                  style="width: 82px; flex-shrink: 0"
+                  size="small"
+                  placeholder="Top-K"
                 />
 
                 <button class="chat-home__attach-btn" @click="handleUploadAttachment" title="上传附件">
@@ -315,6 +358,26 @@
             @keydown="handleComposerKeydown"
           />
           <div class="session-composer__bar">
+            <div
+              v-if="selectedAskMode !== 'llm_only'"
+              class="mode-auto-switch mode-auto-switch--sm"
+              :class="{ 'mode-auto-switch--on': useAutoMode }"
+              role="group"
+              aria-label="多知识库融合"
+            >
+              <div class="mode-auto-switch__text">
+                <div class="mode-auto-switch__title">融合</div>
+                <div class="mode-auto-switch__desc">{{ useAutoMode ? '多库' : '单库' }}</div>
+              </div>
+              <n-switch v-model:value="useAutoMode" size="small" />
+            </div>
+            <n-select
+              v-model:value="selectedAskMode"
+              :options="effectiveQueryModeOptions"
+              style="width: 118px; flex-shrink: 0"
+              size="small"
+            />
+
             <n-select
               v-if="configuredLlmProviders.length > 1"
               v-model:value="selectedLlmProvider"
@@ -331,6 +394,17 @@
               style="width: 170px; flex-shrink: 0"
               size="small"
               placeholder="模型"
+            />
+
+            <n-input-number
+              v-if="selectedAskMode !== 'llm_only'"
+              v-model:value="selectedTopK"
+              :min="1"
+              :max="50"
+              :show-button="false"
+              style="width: 78px; flex-shrink: 0"
+              size="small"
+              placeholder="Top-K"
             />
 
             <button class="session-composer__attach" @click="handleUploadAttachment" title="上传附件">
@@ -383,9 +457,11 @@ import {
   NButton,
   NIcon,
   NInput,
+  NInputNumber,
   NModal,
   NSelect,
   NSpin,
+  NSwitch,
   useMessage
 } from 'naive-ui'
 import {
@@ -437,7 +513,9 @@ const looksLikeRefusalOrEmpty = (answerText) => {
 const getModeLabel = (mode) => {
   const map = {
     naive: '文档检索',
+    bm25: '关键词检索',
     auto: '混合检索',
+    llm_only: '模型直答',
   }
   return map[mode] || mode || '混合检索'
 }
@@ -468,10 +546,17 @@ const conversationScrollerRef = ref(null)
 const activeStreamController = ref(null)
 const activeStreamTurnId = ref(null)
 const { shouldAutoScroll, handleConversationScroll, scrollConversationToBottom } = useChatAutoScroll(conversationScrollerRef)
-const useAutoMode = ref(false)  // 保留以兼容但不展示 UI
+const useAutoMode = ref(false)
 const mobileSidebarOpen = ref(false)
 const selectedLlmProvider = ref('')
 const selectedLlmModel = ref('')
+const selectedTopK = ref(20)
+
+const queryModeOptions = [
+  { label: '混合检索', value: 'auto' },
+  { label: '关键词检索', value: 'bm25' },
+  { label: '模型直答', value: 'llm_only' },
+]
 
 // 从 store 派生，无需硬编码
 const configuredLlmProviders = computed(() => providerStore.llmProviders)
@@ -527,20 +612,20 @@ const selectedKnowledgeBase = computed(() => {
 // Available query modes based on KB capabilities and backend support
 const effectiveQueryModeOptions = computed(() => {
   const kb = selectedKnowledgeBase.value
-  const enabledNaive = kb ? Boolean(kb.enable_naive_rag) : true
+  if (!kb) return queryModeOptions
   const enabledBm25 = Boolean(kb?.enable_bm25)
 
   const modes = queryModeOptions.filter((opt) => {
-    if (opt.value === 'naive') return enabledNaive
+    if (opt.value === 'llm_only') return true
     if (opt.value === 'bm25') return enabledBm25
     return true
   })
-  modes.push({ label: '模型直答', value: 'llm_only' })
   return modes
 })
 
 // The actual mode to send to backend: auto when toggle is on, else the selected manual mode.
 const effectiveSendMode = computed(() => {
+  if (selectedAskMode.value === 'llm_only') return 'llm_only'
   if (useAutoMode.value) return 'auto'
   return selectedAskMode.value
 })
@@ -708,6 +793,12 @@ const loadConversationSession = async (sessionId) => {
   conversationLoading.value = true
   try {
     activeConversation.value = await getConversationSessionDetail(sessionId)
+    const sessionKbIds = activeConversation.value?.session?.kb_ids || []
+    if (sessionKbIds.length > 1) {
+      selectedKnowledgeBaseIds.value = sessionKbIds.map((id) => String(id))
+      selectedKnowledgeBaseId.value = selectedKnowledgeBaseIds.value[0]
+      useAutoMode.value = true
+    }
     if (activeConversation.value?.session?.knowledge_base_id) {
       selectedKnowledgeBaseId.value = String(activeConversation.value.session.knowledge_base_id)
     }
@@ -730,6 +821,24 @@ const handleStartFreshChat = async () => {
 }
 
 const ensureReadyForQuery = () => {
+  if (effectiveSendMode.value === 'llm_only') {
+    return true
+  }
+  if (useAutoMode.value) {
+    if (!selectedKnowledgeBaseIds.value.length) {
+      message.warning('请先选择至少一个知识库')
+      return false
+    }
+    const selectedIds = new Set(selectedKnowledgeBaseIds.value.map((id) => String(id)))
+    const unreadyNames = knowledgeBaseList.value
+      .filter((kb) => selectedIds.has(String(kb.id)) && !kb.is_initialized)
+      .map((kb) => kb.name)
+    if (unreadyNames.length) {
+      message.warning(`以下知识库尚未初始化：${unreadyNames.join('、')}`)
+      return false
+    }
+    return true
+  }
   if (!selectedKnowledgeBaseId.value) {
     message.warning('请先选择知识库')
     return false
@@ -794,12 +903,21 @@ const handleSendQuestion = async () => {
       question: questionText,
       session_id: activeConversation.value?.session?.id || undefined,
       mode: effectiveSendMode.value,
-      top_k: 20,
+      top_k: selectedTopK.value || 20,
       use_memory: true,
       memory_turn_window: 4,
       llm_provider: selectedLlmProvider.value || undefined,
-      llm_model: selectedLlmModel.value || undefined,
-      knowledge_base_id: selectedKnowledgeBaseId.value || undefined
+      llm_model: selectedLlmModel.value || undefined
+    }
+
+    if (effectiveSendMode.value !== 'llm_only') {
+      if (useAutoMode.value) {
+        requestPayload.kb_ids = selectedKnowledgeBaseIds.value.length
+          ? selectedKnowledgeBaseIds.value.map((id) => String(id))
+          : undefined
+      } else {
+        requestPayload.knowledge_base_id = selectedKnowledgeBaseId.value || undefined
+      }
     }
 
     const finalPayload = await executeQueryStream(
@@ -859,7 +977,7 @@ const handleSendQuestion = async () => {
           "",
           "可能原因：",
           "- 当前知识库未命中相关内容",
-          "- 检索模式不合适（可尝试切换为「模型直答」或「文档检索」）",
+          "- 检索模式不合适（可尝试切换检索模式或扩大知识库范围）",
           "- 模型拒答或临时异常",
           "",
           "你可以：点击下方「重试」或换个问法再试一次。"
@@ -871,9 +989,11 @@ const handleSendQuestion = async () => {
       window.dispatchEvent(new CustomEvent("session-changed"))
       await loadConversationSession(finalPayload.session_id)
       await loadRecentSessions()
+      const routeQuery = { session: String(finalPayload.session_id) }
+      if (selectedKnowledgeBaseId.value) routeQuery.kb = selectedKnowledgeBaseId.value
       await router.replace({
         path: '/chat',
-        query: { session: String(finalPayload.session_id), kb: selectedKnowledgeBaseId.value }
+        query: routeQuery
       })
     }
   } catch (error) {
@@ -896,9 +1016,11 @@ const handleSendQuestion = async () => {
 
 const openRecentSession = async (sessionItem) => {
   mobileSidebarOpen.value = false
+  const routeQuery = { session: String(sessionItem.id) }
+  if (sessionItem.knowledge_base_id) routeQuery.kb = String(sessionItem.knowledge_base_id)
   await router.replace({
     path: '/chat',
-    query: { session: String(sessionItem.id), kb: String(sessionItem.knowledge_base_id) }
+    query: routeQuery
   })
 }
 
@@ -945,6 +1067,12 @@ const getSourceTitle = (sourceItem, index) => {
 
 watch(() => route.fullPath, async () => { await initializeFromRoute() }, { immediate: true })
 watch(selectedKnowledgeBaseId, async () => { await loadSelectedKnowledgeBaseStats() })
+
+watch(selectedAskMode, (mode) => {
+  if (mode === 'llm_only') {
+    useAutoMode.value = false
+  }
+})
 
 // 当 Auto 模式切换时，同步单选和多选状态
 watch(useAutoMode, (isMulti) => {

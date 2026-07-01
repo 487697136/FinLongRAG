@@ -26,6 +26,8 @@ from finlongrag.storage.knowledge_repository import (
     KnowledgeDocumentRecord,
 )
 
+_MAX_LEGACY_TASK_STAGE_LENGTH = 32
+
 
 class SQLAlchemyKnowledgeRepository:
     def __init__(self, database_url: str) -> None:
@@ -288,7 +290,7 @@ class SQLAlchemyKnowledgeRepository:
             task_id=uuid.uuid4().hex,
             kb_id=kb_id,
             status=status,
-            stage=stage,
+            stage=_normalize_task_stage(stage),
             total_documents=total_documents,
             processed_documents=0,
             total_chunks=0,
@@ -323,7 +325,7 @@ class SQLAlchemyKnowledgeRepository:
             if status is not None:
                 row.status = status
             if stage is not None:
-                row.stage = stage
+                row.stage = _normalize_task_stage(stage)
             if processed_documents is not None:
                 row.processed_documents = processed_documents
             if total_chunks is not None:
@@ -431,6 +433,11 @@ class SQLAlchemyKnowledgeRepository:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _normalize_task_stage(stage: str) -> str:
+    value = str(stage or "unknown").strip() or "unknown"
+    return value[:_MAX_LEGACY_TASK_STAGE_LENGTH]
 
 
 def _ts(value: datetime | None) -> float:

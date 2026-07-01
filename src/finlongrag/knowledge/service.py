@@ -219,17 +219,19 @@ class KnowledgeService:
                     skipped_documents += 1
                     self.repository.update_task(
                         task.task_id,
-                        stage=f"skip_unchanged:{document_record.doc_id}"[:120],
+                        stage="skip_unchanged",
                         processed_documents=processed_documents,
                         total_chunks=total_chunks,
+                        metadata=_task_document_metadata(document_record),
                     )
                     continue
 
                 self.repository.update_task(
                     task.task_id,
-                    stage=f"parse:{document_record.doc_id}"[:120],
+                    stage="parse",
                     processed_documents=processed_documents,
                     total_chunks=total_chunks,
+                    metadata=_task_document_metadata(document_record),
                 )
                 # Resolve path: support both new relative (to object_storage_root) and legacy absolute paths.
                 resolved_doc_path = self._resolve_document_path(document_record.path)
@@ -241,9 +243,10 @@ class KnowledgeService:
                     )
                     self.repository.update_task(
                         task.task_id,
-                        stage=f"skip_missing:{document_record.doc_id}"[:120],
+                        stage="skip_missing",
                         processed_documents=processed_documents,
                         total_chunks=total_chunks,
+                        metadata=_task_document_metadata(document_record),
                     )
                     continue
                 self.repository.update_document_state(document_record.document_id, status="parsing", error="")
@@ -284,9 +287,10 @@ class KnowledgeService:
                 )
                 self.repository.update_task(
                     task.task_id,
-                    stage=f"chunked:{document_record.doc_id}"[:120],
+                    stage="chunked",
                     processed_documents=processed_documents,
                     total_chunks=total_chunks,
+                    metadata=_task_document_metadata(document_record),
                 )
 
             index_info: dict[str, Any] = {}
@@ -301,6 +305,7 @@ class KnowledgeService:
                     stage="build_index",
                     processed_documents=processed_documents,
                     total_chunks=total_chunks,
+                    metadata={"current_document_id": "", "current_doc_id": ""},
                 )
                 index_info = self.build_indexes(
                     kb_id=task.kb_id,
@@ -589,6 +594,14 @@ def _scope_chunks(*, kb_id: str, document_id: str, chunks: list[Chunk]) -> list[
             )
         )
     return output
+
+
+def _task_document_metadata(record: KnowledgeDocumentRecord) -> dict[str, str]:
+    return {
+        "current_document_id": record.document_id,
+        "current_doc_id": record.doc_id,
+        "current_document_title": record.title,
+    }
 
 
 def _sha256_file(path: Path) -> str:

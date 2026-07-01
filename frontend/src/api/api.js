@@ -35,29 +35,13 @@ export async function rebuildKnowledgeBase(kbId) {
 }
 
 /** 保留旧接口能力，当前主流程不在前端入口暴露 */
-export async function rebuildKnowledgeGraph(kbId) {
-  const response = await api.post(`/knowledge-bases/${kbId}/rebuild-graph`)
-  return response.data
-}
-
-/** 保留旧接口能力，当前主流程不在前端入口暴露 */
 export async function rebuildVectorIndex(kbId) {
   const response = await api.post(`/knowledge-bases/${kbId}/rebuild-vectors`)
   return response.data
 }
 
-export async function cleanupKnowledgeBase(kbId) {
-  const response = await api.post(`/knowledge-bases/${kbId}/cleanup`)
-  return response.data
-}
-
 export async function getKnowledgeBaseStats(kbId) {
   const response = await api.get(`/knowledge-bases/${kbId}/stats`)
-  return response.data
-}
-
-export async function getKnowledgeBaseGraph(kbId, params = {}) {
-  const response = await api.get(`/knowledge-bases/${kbId}/graph`, { params })
   return response.data
 }
 

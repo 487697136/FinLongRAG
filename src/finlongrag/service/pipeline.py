@@ -116,6 +116,7 @@ class FinLongRAGPipeline:
         history: str = "",
         history_entities: dict | None = None,
         mode: str = "auto",
+        top_k: int | None = None,
         llm_model: str | None = None,
     ) -> AnswerResult:
         question = _build_question(
@@ -124,6 +125,7 @@ class FinLongRAGPipeline:
             doc_ids=doc_ids,
             kb_id=kb_id,
             kb_ids=kb_ids,
+            top_k=top_k,
             qid=qid,
         )
         return self.answer(
@@ -176,6 +178,7 @@ class FinLongRAGPipeline:
         history: str = "",
         history_entities: dict | None = None,
         mode: str = "auto",
+        top_k: int | None = None,
         llm_model: str | None = None,
     ) -> Iterator[AnswerStreamEvent]:
         question = _build_question(
@@ -184,6 +187,7 @@ class FinLongRAGPipeline:
             doc_ids=doc_ids,
             kb_id=kb_id,
             kb_ids=kb_ids,
+            top_k=top_k,
             qid=qid,
         )
         yield from self.answer_stream(
@@ -202,6 +206,7 @@ def _build_question(
     doc_ids: list[str] | None,
     kb_id: str | None,
     kb_ids: list[str] | None,
+    top_k: int | None,
     qid: str,
 ) -> Question:
     question = Question(
@@ -211,12 +216,17 @@ def _build_question(
         doc_ids=doc_ids or [],
         answer_format="open",
     )
+    metadata: dict[str, object] = {}
+    if top_k is not None:
+        metadata["top_k"] = max(1, min(int(top_k), 50))
     if kb_ids:
-        question.metadata = {"kb_ids": kb_ids}
+        metadata["kb_ids"] = kb_ids
         if len(kb_ids) == 1:
-            question.metadata["kb_id"] = kb_ids[0]
+            metadata["kb_id"] = kb_ids[0]
     elif kb_id:
-        question.metadata = {"kb_id": kb_id}
+        metadata["kb_id"] = kb_id
+    if metadata:
+        question.metadata = metadata
     return question
 
 

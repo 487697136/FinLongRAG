@@ -62,6 +62,7 @@ class ChatService:
         kb_ids: list[str] | None = None,
         use_memory: bool = True,
         mode: str = "auto",
+        top_k: int | None = None,
         memory_turn_window: int | None = None,
         llm_model: str | None = None,
     ) -> ChatResponse:
@@ -91,6 +92,9 @@ class ChatService:
                 "knowledge_base_id": kb_id or "",
                 "kb_ids": kb_ids or [],
                 "use_memory": use_memory,
+                "mode": mode,
+                "top_k": top_k,
+                "llm_model": llm_model,
             },
         )
         try:
@@ -104,6 +108,7 @@ class ChatService:
                 history=history,
                 history_entities=history_entities if use_memory else {},
                 mode=mode,
+                top_k=top_k,
                 llm_model=llm_model,
             )
         except Exception as exc:
@@ -157,6 +162,7 @@ class ChatService:
         kb_ids: list[str] | None = None,
         use_memory: bool = True,
         mode: str = "auto",
+        top_k: int | None = None,
         memory_turn_window: int | None = None,
         llm_model: str | None = None,
     ) -> Iterator[AnswerStreamEvent]:
@@ -182,6 +188,9 @@ class ChatService:
                 "knowledge_base_id": kb_id or "",
                 "kb_ids": kb_ids or [],
                 "use_memory": use_memory,
+                "mode": mode,
+                "top_k": top_k,
+                "llm_model": llm_model,
             },
         )
 
@@ -196,6 +205,7 @@ class ChatService:
                 history=history,
                 history_entities=history_entities if use_memory else {},
                 mode=mode,
+                top_k=top_k,
                 llm_model=llm_model,
             ):
                 if event.done and event.result is not None:

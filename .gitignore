@@ -26,3 +26,6 @@ frontend/*.local
 # Ignore Windows appdata junk
 frontend/%APPDATA%/
 frontend/APPDATA/
+
+# Local assistant/tool worktrees
+.claude/

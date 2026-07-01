@@ -64,6 +64,7 @@ def test_parse_pdf_supports_markdown_returned_directly(monkeypatch, tmp_path):
         _ = args, kwargs
         return "# p1\n\nhello\n\n---PAGE-2---\n\nworld"
 
+    monkeypatch.setattr(parser, "_opendataloader_preflight_error", lambda: None)
     monkeypatch.setattr(parser.opendataloader_pdf, "convert", fake_convert)
 
     pages = parser._parse_pdf(pdf_path, document, settings=None)
@@ -86,6 +87,7 @@ def test_parse_pdf_falls_back_to_text_output(monkeypatch, tmp_path):
             (Path(output_dir) / "demo.txt").write_text("p1\n\n---PAGE-2---\n\np2", encoding="utf-8")
         return None
 
+    monkeypatch.setattr(parser, "_opendataloader_preflight_error", lambda: None)
     monkeypatch.setattr(parser.opendataloader_pdf, "convert", fake_convert)
 
     pages = parser._parse_pdf(pdf_path, document, settings=None)
@@ -122,6 +124,7 @@ def test_parse_pdf_falls_back_to_pymupdf(monkeypatch, tmp_path):
         def open(_path):
             return FakePdf()
 
+    monkeypatch.setattr(parser, "_opendataloader_preflight_error", lambda: None)
     monkeypatch.setattr(parser.opendataloader_pdf, "convert", fake_convert)
     monkeypatch.setattr(parser, "_has_tesseract", lambda: False)
     import builtins
@@ -139,3 +142,48 @@ def test_parse_pdf_falls_back_to_pymupdf(monkeypatch, tmp_path):
     assert len(pages) == 1
     assert pages[0].metadata["parser"] == "pymupdf"
     assert "page2 text" in pages[0].text
+
+
+def test_parse_pdf_skips_opendataloader_when_java_is_too_old(monkeypatch, tmp_path):
+    pdf_path = tmp_path / "demo.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF")
+    document = Document(doc_id="demo", domain="reports", title="Demo", path=str(pdf_path))
+
+    def fail_convert(*_args, **_kwargs):
+        raise AssertionError("opendataloader should be skipped when Java is too old")
+
+    class FakePage:
+        def get_text(self, *_args, **_kwargs):
+            return "fallback text"
+
+    class FakePdf:
+        def __iter__(self):
+            return iter([FakePage()])
+
+        def close(self):
+            pass
+
+    class FakeFitz:
+        @staticmethod
+        def open(_path):
+            return FakePdf()
+
+    monkeypatch.setattr(parser, "_opendataloader_preflight_error", lambda: "Java 8 is too old")
+    monkeypatch.setattr(parser.opendataloader_pdf, "convert", fail_convert)
+    monkeypatch.setattr(parser, "_has_tesseract", lambda: False)
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "fitz":
+            return FakeFitz
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    pages = parser._parse_pdf(pdf_path, document, settings=None)
+    assert len(pages) == 1
+    assert pages[0].metadata["parser"] == "pymupdf"
+    assert "fallback text" in pages[0].text

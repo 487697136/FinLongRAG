@@ -331,7 +331,9 @@ async function handleDelete(id) {
 onMounted(async () => {
   await loadAll()
   pollTimer = window.setInterval(() => {
-    if (!document.hidden) loadEvaluations()
+    if (!document.hidden && evaluations.value.some((item) => item.status === 'running')) {
+      loadEvaluations()
+    }
   }, 2500)
 })
 

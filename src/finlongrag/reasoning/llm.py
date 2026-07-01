@@ -27,7 +27,12 @@ def llm_model_scope(model: str | None):
     try:
         yield
     finally:
-        _request_llm_model.reset(token)
+        try:
+            _request_llm_model.reset(token)
+        except ValueError:
+            # Streaming responses may close the generator from a different
+            # execution context than the one that created the token.
+            pass
 
 
 def resolve_chat_model(settings: Settings, explicit: str | None = None) -> str:
@@ -186,4 +191,3 @@ class QwenChatModel:
 
         except Exception as exc:
             raise RuntimeError(f"Qwen streaming API call failed: {exc}") from exc
-

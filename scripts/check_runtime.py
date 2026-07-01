@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
 
 import faiss
 from sqlalchemy import inspect, text
@@ -35,8 +40,19 @@ def main() -> int:
     if java:
         try:
             proc = subprocess.run([java, "-version"], capture_output=True, text=True, timeout=10, check=False)
-            version_line = (proc.stderr or proc.stdout or "").splitlines()[0] if (proc.stderr or proc.stdout) else "unknown"
+            version_output = proc.stderr or proc.stdout or ""
+            version_line = version_output.splitlines()[0] if version_output else "unknown"
             print(f"[pdf] java={version_line}")
+            java_major = _parse_java_major_version(version_output)
+            if java_major is None:
+                ok = False
+                print("[pdf] java_version=unknown (Java 11+ required for opendataloader-pdf)", file=sys.stderr)
+            elif java_major < 11:
+                ok = False
+                print(
+                    f"[pdf] java_version={java_major} too old (install Java 11+ for opendataloader-pdf)",
+                    file=sys.stderr,
+                )
         except OSError as exc:
             ok = False
             print(f"[pdf] java_error={exc}", file=sys.stderr)
@@ -77,7 +93,21 @@ def main() -> int:
             if "alembic_version" in tables:
                 versions = [row[0] for row in conn.execute(text("select version_num from alembic_version")).fetchall()]
                 print(f"[alembic] versions={versions}")
-    except SQLAlchemyError as exc:
+            if "ingestion_tasks" in tables:
+                stage_length = conn.execute(
+                    text(
+                        """
+                        select character_maximum_length
+                        from information_schema.columns
+                        where table_name = 'ingestion_tasks' and column_name = 'stage'
+                        """
+                    )
+                ).scalar_one_or_none()
+                print(f"[schema] ingestion_tasks.stage_length={stage_length or 'unbounded'}")
+                if stage_length and int(stage_length) < 32:
+                    ok = False
+                    print("[schema] ingestion_tasks.stage column is unexpectedly short", file=sys.stderr)
+    except (ImportError, ModuleNotFoundError, SQLAlchemyError) as exc:
         ok = False
         print(f"[postgres] error={exc.__class__.__name__}: {exc}", file=sys.stderr)
 
@@ -121,6 +151,16 @@ def main() -> int:
         return 0
     print("[result] FAILED")
     return 1
+
+
+def _parse_java_major_version(output: str) -> int | None:
+    match = re.search(r'version\s+"(?P<version>\d+)(?:\.(?P<minor>\d+))?', output)
+    if not match:
+        return None
+    major = int(match.group("version"))
+    if major == 1 and match.group("minor"):
+        return int(match.group("minor"))
+    return major
 
 
 if __name__ == "__main__":

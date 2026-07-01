@@ -14,7 +14,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
 import base64
 import jwt
@@ -49,6 +49,7 @@ from finlongrag.storage.knowledge_repository import KnowledgeDocumentRecord
 from finlongrag.tasks.local import get_default_executor
 
 security = HTTPBearer(auto_error=False)
+QueryMode = Literal["auto", "naive", "bm25", "llm_only"]
 
 
 class RegisterRequest(BaseModel):
@@ -76,10 +77,10 @@ class QueryRequest(BaseModel):
     knowledge_base_id: str | int | None = None
     kb_ids: list[str] | None = None  # 多知识库融合模式
     session_id: str | int | None = None
-    mode: str = "auto"
+    mode: QueryMode = "auto"
     top_k: int = Field(default=20, ge=1, le=50)
     use_memory: bool = True
-    memory_turn_window: int = 4
+    memory_turn_window: int = Field(default=4, ge=0, le=20)
     llm_provider: str | None = None
     llm_model: str | None = None
 
@@ -608,6 +609,7 @@ def create_v1_router(
                         kb_ids=kb_ids,
                         use_memory=payload.use_memory,
                         mode=payload.mode,
+                        top_k=payload.top_k,
                         memory_turn_window=payload.memory_turn_window,
                         llm_model=llm_model,
                     ):
@@ -828,10 +830,12 @@ class AuthService:
     def __init__(self, settings_provider: Callable[[], Settings]) -> None:
         self.settings_provider = settings_provider
         self.database_url = settings_provider().database_url
-        self.sessionmaker = get_sync_sessionmaker(self.database_url)
+
+    def sessionmaker(self):
+        return get_sync_sessionmaker(self.database_url)
 
     def register(self, payload: RegisterRequest) -> dict[str, Any]:
-        with self.sessionmaker() as session:
+        with self.sessionmaker()() as session:
             session.execute(select(User).with_for_update())
             existing = session.scalar(
                 select(User).where(
@@ -858,7 +862,7 @@ class AuthService:
             return self.serialize_user(user)
 
     def login(self, username: str, password: str) -> dict[str, str]:
-        with self.sessionmaker() as session:
+        with self.sessionmaker()() as session:
             user = session.scalar(select(User).where(or_(User.email == username, User.display_name == username)))
             if self._matches_default_user(username, password):
                 user = self._ensure_default_admin(session, user)
@@ -876,7 +880,7 @@ class AuthService:
             user_id = str(payload["sub"])
         except Exception as exc:
             raise HTTPException(status_code=401, detail="Invalid authentication token.") from exc
-        with self.sessionmaker() as session:
+        with self.sessionmaker()() as session:
             user = session.get(User, user_id)
             if user is None or not user.is_active:
                 raise HTTPException(status_code=401, detail="User not found or inactive.")
@@ -884,7 +888,7 @@ class AuthService:
             return user
 
     def change_password(self, user: User, old_password: str, new_password: str) -> None:
-        with self.sessionmaker() as session:
+        with self.sessionmaker()() as session:
             current = session.get(User, user.id)
             if current is None or not current.password_hash:
                 raise HTTPException(status_code=404, detail="User not found.")
@@ -1009,10 +1013,12 @@ def _document_status_for_frontend(status: str) -> str:
 def _session_summary(chat: ChatService, conversation) -> dict[str, Any]:
     messages = chat.list_messages(conversation.conversation_id, limit=1000)
     kb_id = conversation.metadata.get("knowledge_base_id") or _last_kb_id(messages)
+    kb_ids = conversation.metadata.get("kb_ids") or _last_kb_ids(messages)
     return {
         "id": conversation.conversation_id,
         "title": conversation.title,
         "knowledge_base_id": kb_id,
+        "kb_ids": [str(kid) for kid in kb_ids if kid],
         "created_at": _unix_to_iso(conversation.created_at),
         "updated_at": _unix_to_iso(conversation.updated_at),
         "last_active_at": _unix_to_iso(conversation.updated_at),
@@ -1084,6 +1090,14 @@ def _last_kb_id(messages) -> str:
         if kb_id:
             return str(kb_id)
     return ""
+
+
+def _last_kb_ids(messages) -> list[str]:
+    for message in reversed(messages):
+        kb_ids = (message.metadata or {}).get("kb_ids") or []
+        if kb_ids:
+            return [str(kid) for kid in kb_ids if kid]
+    return []
 
 
 def _sse_data(data: dict[str, Any]) -> str:

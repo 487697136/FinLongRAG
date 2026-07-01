@@ -82,21 +82,13 @@
                 type="primary"
                 secondary
                 :loading="rebuilding"
-                :disabled="rebuilding || cleaning"
+                :disabled="rebuilding"
                 @click="confirmRebuild"
                 style="min-width: 72px"
               >
                 {{ rebuilding ? '重建中...' : '重建索引' }}
               </n-button>
-              <n-button
-                secondary
-                :loading="cleaning"
-                :disabled="rebuilding || cleaning"
-                @click="handleCleanupKnowledgeBase(selectedKnowledgeBase.id)"
-              >
-                {{ cleaning ? '清理中...' : '清理运行时' }}
-              </n-button>
-              <n-button type="error" quaternary :disabled="rebuilding || cleaning" @click="confirmDeleteKnowledgeBase(selectedKnowledgeBase)">删除</n-button>
+              <n-button type="error" quaternary :disabled="rebuilding" @click="confirmDeleteKnowledgeBase(selectedKnowledgeBase)">删除</n-button>
             </n-space>
           </template>
 
@@ -151,7 +143,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { NButton, NDrawer, NDrawerContent, NFormItem, NIcon, NInput, NModal, NSpace, NSpin, NSwitch, useMessage } from 'naive-ui'
-import { cleanupKnowledgeBase, createKnowledgeBase, deleteKnowledgeBase, rebuildKnowledgeBase } from '@/api/api'
+import { createKnowledgeBase, deleteKnowledgeBase, rebuildKnowledgeBase } from '@/api/api'
 import AppEmpty from '@/components/common/AppEmpty.vue'
 import DetailPanel from '@/components/common/DetailPanel.vue'
 import FilterToolbar from '@/components/common/FilterToolbar.vue'
@@ -167,7 +159,6 @@ const kbStore = useKnowledgeBaseStore()
 
 const creating = ref(false)
 const rebuilding = ref(false)
-const cleaning = ref(false)
 const deleting = ref(false)
 
 // 重建模式相关状态
@@ -278,20 +269,6 @@ async function executeRebuild() {
     message.error(error.response?.data?.detail || '完整重建失败')
   } finally {
     rebuilding.value = false
-  }
-}
-
-async function handleCleanupKnowledgeBase(kbId) {
-  cleaning.value = true
-  try {
-    await cleanupKnowledgeBase(kbId)
-    message.success('运行时数据已清理')
-    kbStore.invalidate(kbId)
-    await Promise.all([kbStore.fetchList(true), loadKnowledgeBaseStats(kbId)])
-  } catch (error) {
-    message.error(error.response?.data?.detail || '清理知识库运行时失败')
-  } finally {
-    cleaning.value = false
   }
 }
 

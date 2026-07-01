@@ -53,6 +53,19 @@ def test_should_rerank_skips_when_score_gap_is_large():
     assert info["reason"] == "score_gap_sufficient"
 
 
+def test_query_cache_separates_different_top_k():
+    cache = QueryAnswerCache(max_entries=8, ttl_seconds=600)
+    q5 = Question(qid="q1", question="net profit?", metadata={"kb_id": "kb1", "top_k": 5})
+    q20 = Question(qid="q1", question="net profit?", metadata={"kb_id": "kb1", "top_k": 20})
+    result = AnswerResult(qid="q1", answer="30", domain="", answer_format="open", token_usage=TokenUsage())
+
+    cache.store(q5, result, mode="auto")
+    lookup, cached = cache.lookup(q20, mode="auto")
+
+    assert lookup.hit is False
+    assert cached is None
+
+
 def test_should_rerank_triggers_when_top_scores_are_close():
     candidates = [
         RetrievalResult(chunk_id=f"c{i}", doc_id="d1", domain="", evidence_text="x", score=score, source="t", query="q")
@@ -88,3 +101,11 @@ def test_allocate_evidence_budget_trims_for_long_history():
     settings = Settings.from_file()
     budget = allocate_evidence_budget(settings, history_chars=5000)
     assert budget.max_evidence_chars < settings.max_evidence_chars
+
+
+def test_dense_evidence_budget_keeps_rerank_above_evidence_target():
+    settings = Settings.from_file()
+    budget = allocate_evidence_budget(settings, intent={"dense_evidence": True})
+
+    assert budget.evidence_top_k >= settings.evidence_top_k
+    assert budget.rerank_top_k >= budget.evidence_top_k

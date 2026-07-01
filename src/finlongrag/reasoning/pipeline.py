@@ -359,6 +359,10 @@ class ReasoningPipeline:
         rerank_top_k = budget.rerank_top_k if budget else max(
             self.evidence_top_k * self.rerank_top_k_multiplier, self.evidence_top_k
         )
+        requested_top_k = _requested_top_k(question)
+        if requested_top_k is not None:
+            evidence_top_k = requested_top_k
+            rerank_top_k = max(rerank_top_k, requested_top_k * self.rerank_top_k_multiplier)
 
         filter_doc_ids = set(question.doc_ids) if question.doc_ids else None
         ctx = StepContext(
@@ -372,6 +376,8 @@ class ReasoningPipeline:
             "rerank_top_k": rerank_top_k,
             "evidence_top_k": evidence_top_k,
             "max_evidence_chars": max_evidence_chars,
+            "top_k_per_query": max(self.settings.top_k_per_query, rerank_top_k),
+            "fused_top_k": max(self.settings.fused_top_k, rerank_top_k),
             "filter_doc_ids": filter_doc_ids,
             "history": history,
             "history_entities": history_entities,
@@ -684,6 +690,8 @@ class ReasoningPipeline:
                 filter_doc_ids=cfg["filter_doc_ids"],
                 source="rag",
                 metadata=retrieve_metadata,
+                top_k_per_query=int(cfg["top_k_per_query"]),
+                fused_top_k=int(cfg["fused_top_k"]),
                 bm25_weight=cfg["bm25_w"],
                 faiss_weight=cfg["faiss_w"],
             )
@@ -746,6 +754,8 @@ class ReasoningPipeline:
                     filter_doc_ids=cfg["filter_doc_ids"],
                     source="rag_retry",
                     metadata=retrieve_metadata,
+                    top_k_per_query=int(cfg["top_k_per_query"]),
+                    fused_top_k=int(cfg["fused_top_k"]),
                     bm25_weight=cfg["bm25_w"],
                     faiss_weight=cfg["faiss_w"],
                 )
@@ -877,3 +887,13 @@ def _history_note(history: str) -> str:
     if not history:
         return ""
     return "[会话上下文]\n" + history[:2000]
+
+
+def _requested_top_k(question: Question) -> int | None:
+    raw = (question.metadata or {}).get("top_k")
+    if raw in (None, ""):
+        return None
+    try:
+        return max(1, min(int(raw), 50))
+    except (TypeError, ValueError):
+        return None

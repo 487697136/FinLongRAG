@@ -41,12 +41,6 @@ const router = createRouter({
           meta: { title: '文档资产' }
         },
         {
-          path: 'graph',
-          name: 'Graph',
-          redirect: '/chat',
-          meta: { title: '金融分析' }
-        },
-        {
           path: 'test-sets',
           name: 'TestSets',
           component: () => import('@/views/evaluation/TestSetManage.vue'),

@@ -95,9 +95,14 @@ def create_app(*, dry_run: bool = False) -> FastAPI:
     @app.get("/api/health")
     def health() -> ApiResponse:
         loaded = settings()
-        kb_count = len(knowledge_service().list_knowledge_bases(limit=1000))
-        document_count = len(knowledge_service().list_documents(limit=1000))
-        active_index = knowledge_service().get_active_index_version()
+        if dry_run:
+            kb_count = 0
+            document_count = 0
+            active_index = None
+        else:
+            kb_count = len(knowledge_service().list_knowledge_bases(limit=1000))
+            document_count = len(knowledge_service().list_documents(limit=1000))
+            active_index = knowledge_service().get_active_index_version()
         return ApiResponse(
             data={
                 "status": "ok",

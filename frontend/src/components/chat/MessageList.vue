@@ -70,7 +70,7 @@
               @click="toggleSources(turn.id)"
             >
               <slot name="source-icon" />
-              <span>{{ sourcesSummaryLabel(turn.sources) }}</span>
+              <span>{{ sourcesSummaryLabel(turn) }}</span>
               <svg
                 class="msg-sources__chevron"
                 :class="{ 'msg-sources__chevron--open': sourcesOpenMap[turn.id] }"
@@ -83,14 +83,17 @@
             <transition name="sources-expand">
               <div v-if="sourcesOpenMap[turn.id]" class="source-evidence-list">
                 <article
-                  v-for="(src, idx) in turn.sources"
+                  v-for="(src, idx) in visibleSources(turn)"
                   :key="idx"
                   class="source-evidence-card"
                   :title="getSourceTooltip(src)"
                 >
                   <div class="source-evidence-card__header">
-                    <div class="source-evidence-card__title">{{ getSourceTitle(src, idx) }}</div>
-                    <span v-if="src?.score != null" class="source-evidence-card__score">相关度 {{ (src.score * 100).toFixed(0) }}%</span>
+                    <div class="source-evidence-card__title">
+                      <span v-if="src?._evidenceIndex" class="source-evidence-card__cite">E{{ src._evidenceIndex }}</span>
+                      {{ getSourceTitle(src, idx) }}
+                    </div>
+                    <span v-if="formatSourceScore(src)" class="source-evidence-card__score">{{ formatSourceScore(src) }}</span>
                   </div>
                   <div class="source-evidence-card__meta">
                     <span v-if="src?.source">检索来源：{{ normalizeSourceLabel(src.source) }}</span>
@@ -269,6 +272,35 @@ const STREAM_STATUS_LABELS = {
 
 const streamStatusLabel = (status) => STREAM_STATUS_LABELS[status] || '处理中…'
 
+const MAX_VISIBLE_SOURCES = 8
+
+const citationIndexes = (answer) => {
+  const indexes = new Set()
+  const text = String(answer || '')
+  for (const match of text.matchAll(/\[E(\d+)\]/g)) {
+    indexes.add(Number(match[1]))
+  }
+  return indexes
+}
+
+const sourceWithEvidenceIndex = (src, idx) => ({
+  ...src,
+  _evidenceIndex: idx + 1
+})
+
+const visibleSources = (turn) => {
+  const sources = Array.isArray(turn?.sources) ? turn.sources : []
+  if (!sources.length) return []
+
+  const cited = citationIndexes(turn?.answer)
+  const indexed = sources.map(sourceWithEvidenceIndex)
+  if (cited.size) {
+    const citedSources = indexed.filter((src) => cited.has(src._evidenceIndex))
+    if (citedSources.length) return citedSources
+  }
+  return indexed.slice(0, MAX_VISIBLE_SOURCES)
+}
+
 /**
  * Group raw evidence chunks by document, returning one entry per unique document.
  * Each returned object has: _dedupeKey, _label, _tooltip, _chunkCount.
@@ -316,7 +348,7 @@ const deduplicateSources = (sources) => {
         : `第 ${sorted.join('、')} 页`
       parts.push(pagesStr)
     }
-    if (entry._bestScore > 0) parts.push(`相关度: ${(entry._bestScore * 100).toFixed(0)}%`)
+    if (entry._bestScore > 0) parts.push(`排序分: ${formatRawScore(entry._bestScore)}`)
     return { ...entry, _tooltip: parts.join(' | ') }
   })
 }
@@ -325,27 +357,61 @@ const deduplicateSources = (sources) => {
  * Summary label for the sources toggle button.
  * e.g. "引用来源（2 篇文档，共 8 段）" or "引用来源（1 篇文档）"
  */
-const sourcesSummaryLabel = (sources) => {
+const sourcesSummaryLabel = (turn) => {
+  const sources = Array.isArray(turn?.sources) ? turn.sources : []
   if (!sources?.length) return '引用来源'
   const deduped = deduplicateSources(sources)
   const docCount = deduped.length
   const chunkCount = sources.length
-  if (docCount === chunkCount) {
-    return `引用来源（${docCount}）`
+  const visibleCount = visibleSources(turn).length
+  const citedCount = citationIndexes(turn?.answer).size
+  if (citedCount && visibleCount) {
+    return `引用来源（答案引用 ${visibleCount} 段 / 共 ${chunkCount} 段证据）`
   }
-  return `引用来源（${docCount} 篇文档，共 ${chunkCount} 段）`
+  if (chunkCount > MAX_VISIBLE_SOURCES) {
+    return `引用来源（展示前 ${MAX_VISIBLE_SOURCES} 段 / 共 ${chunkCount} 段证据）`
+  }
+  if (docCount === chunkCount) return `引用来源（${docCount}）`
+  return `引用来源（${docCount} 篇文档，共 ${chunkCount} 段证据）`
 }
 
 const normalizeSourceLabel = (source) => {
   const v = String(source || '').trim()
   const map = {
-    naive: '文档检索',
+    naive: '向量检索',
     vector: '向量检索',
     bm25: '关键词检索',
     keyword: '关键词检索',
-    auto: '混合检索'
+    auto: '混合检索',
+    'rrf:bm25': '融合排序：关键词',
+    'rrf:faiss': '融合排序：向量',
+    'rrf:vector': '融合排序：向量'
   }
   return map[v] || v || '未知来源'
+}
+
+const formatRawScore = (score) => {
+  const value = Number(score)
+  if (!Number.isFinite(value)) return ''
+  if (value >= 100) return value.toFixed(0)
+  if (value >= 10) return value.toFixed(1)
+  if (value >= 1) return value.toFixed(2)
+  return value.toFixed(3)
+}
+
+const formatSourceScore = (src) => {
+  const rerankScore = Number(src?.metadata?.rerank_score)
+  if (Number.isFinite(rerankScore)) {
+    if (rerankScore >= 0 && rerankScore <= 1) return `重排相关性 ${(rerankScore * 100).toFixed(0)}%`
+    return `重排分 ${formatRawScore(rerankScore)}`
+  }
+
+  const score = Number(src?.score)
+  if (!Number.isFinite(score)) return ''
+  const source = String(src?.source || '')
+  if (source.startsWith('rrf:')) return `融合排序分 ${formatRawScore(score)}`
+  if (score >= 0 && score <= 1) return `检索分 ${formatRawScore(score)}`
+  return `检索分 ${formatRawScore(score)}`
 }
 
 const getSourceTooltip = (src) => {
@@ -372,7 +438,8 @@ const getSourceTooltip = (src) => {
     parts.push(normalize(src.source))
   }
 
-  if (src?.score != null) parts.push(`相关度: ${(src.score * 100).toFixed(0)}%`)
+  const scoreLabel = formatSourceScore(src)
+  if (scoreLabel) parts.push(scoreLabel)
   return parts.join(' | ')
 }
 

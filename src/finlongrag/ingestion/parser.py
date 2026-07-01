@@ -12,16 +12,31 @@ import inspect
 import json
 import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
-
-import opendataloader_pdf
 
 from finlongrag.core.config import Settings
 from finlongrag.core.schema import Document, PageText
 
 _PAGE_SEPARATOR = "\n\n---PAGE-%page-number%---\n\n"
+
+_OPENDATALOADER_IMPORT_ERROR: ImportError | None = None
+try:
+    import opendataloader_pdf
+except ImportError as exc:
+    _OPENDATALOADER_IMPORT_ERROR = exc
+
+    class _MissingOpenDataLoaderPdf:
+        @staticmethod
+        def convert(*_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError(
+                "opendataloader-pdf is required to parse PDF files. "
+                "Install it with `pip install opendataloader-pdf`."
+            ) from _OPENDATALOADER_IMPORT_ERROR
+
+    opendataloader_pdf = _MissingOpenDataLoaderPdf()
 
 
 def parse_document(
@@ -74,33 +89,39 @@ def _parse_pdf(path: Path, document: Document, settings: Settings | None) -> lis
         if settings.pdf_hybrid_url:
             convert_kwargs["hybrid_url"] = settings.pdf_hybrid_url
 
-    with tempfile.TemporaryDirectory(prefix="finlongrag-pdf-") as tmp:
-        output_dir = Path(tmp)
-        convert_result = _convert_pdf(output_dir=output_dir, convert_kwargs=convert_kwargs)
-        markdown_text = _extract_markdown_from_result(convert_result)
-        if markdown_text:
-            return markdown_to_pages(markdown_text, document, path)
+    conversion_error = _opendataloader_preflight_error()
+    if conversion_error is None:
+        with tempfile.TemporaryDirectory(prefix="finlongrag-pdf-") as tmp:
+            output_dir = Path(tmp)
+            try:
+                convert_result = _convert_pdf(output_dir=output_dir, convert_kwargs=convert_kwargs)
+                markdown_text = _extract_markdown_from_result(convert_result)
+                if markdown_text:
+                    return markdown_to_pages(markdown_text, document, path)
 
-        md_path = _find_generated_file(output_dir, path.stem, suffix=".md")
-        if md_path is not None:
-            return markdown_to_pages(md_path.read_text(encoding="utf-8"), document, path)
+                md_path = _find_generated_file(output_dir, path.stem, suffix=".md")
+                if md_path is not None:
+                    return markdown_to_pages(md_path.read_text(encoding="utf-8"), document, path)
 
-        text_pages = _parse_pdf_via_text_output(path, document, output_dir=output_dir, settings=settings)
-        if text_pages:
-            return text_pages
+                text_pages = _parse_pdf_via_text_output(path, document, output_dir=output_dir, settings=settings)
+                if text_pages:
+                    return text_pages
+            except Exception as exc:
+                conversion_error = _format_pdf_conversion_error(exc)
 
-        pymupdf_pages = _parse_pdf_via_pymupdf(path, document)
-        if pymupdf_pages:
-            return pymupdf_pages
+    pymupdf_pages = _parse_pdf_via_pymupdf(path, document)
+    if pymupdf_pages:
+        return pymupdf_pages
 
-        pypdf_pages = _parse_pdf_via_pypdf(path, document)
-        if pypdf_pages:
-            return pypdf_pages
+    pypdf_pages = _parse_pdf_via_pypdf(path, document)
+    if pypdf_pages:
+        return pypdf_pages
 
-        raise RuntimeError(
-            f"failed to parse PDF {path.name}: no markdown/text output from opendataloader-pdf and no extractable text via pypdf/pymupdf. "
-            "This file is likely a scanned image PDF; enable OCR (install Tesseract) or configure opendataloader hybrid OCR backend."
-        )
+    raise RuntimeError(
+        f"failed to parse PDF {path.name}: {conversion_error or 'opendataloader-pdf produced no extractable text'}. "
+        "No extractable text was found via PyMuPDF/pypdf fallback. "
+        "If this is a scanned PDF, install Java 11+ for opendataloader-pdf or configure OCR support."
+    )
 
 
 def _convert_pdf(*, output_dir: Path, convert_kwargs: dict) -> Any:
@@ -112,6 +133,51 @@ def _convert_pdf(*, output_dir: Path, convert_kwargs: dict) -> Any:
         kwargs["output_dir"] = str(output_dir)
         return opendataloader_pdf.convert(**kwargs)
     return opendataloader_pdf.convert(str(output_dir), **kwargs)
+
+
+def _opendataloader_preflight_error() -> str | None:
+    if _OPENDATALOADER_IMPORT_ERROR is not None:
+        return "opendataloader-pdf is not installed"
+    java_major = _java_major_version()
+    if java_major is None:
+        return "Java runtime was not found; install Java 11+ to use opendataloader-pdf"
+    if java_major < 11:
+        return f"Java {java_major} is too old for opendataloader-pdf; install Java 11+"
+    return None
+
+
+def _java_major_version() -> int | None:
+    java = shutil.which("java")
+    if not java:
+        return None
+    try:
+        result = subprocess.run(
+            [java, "-version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return None
+    output = "\n".join(part for part in (result.stderr, result.stdout) if part)
+    match = re.search(r'version\s+"(?P<version>\d+)(?:\.(?P<minor>\d+))?', output)
+    if not match:
+        return None
+    major = int(match.group("version"))
+    if major == 1 and match.group("minor"):
+        return int(match.group("minor"))
+    return major
+
+
+def _format_pdf_conversion_error(exc: Exception) -> str:
+    if isinstance(exc, subprocess.CalledProcessError):
+        stderr = (exc.stderr or "").strip()
+        if "UnsupportedClassVersionError" in stderr or "class file version 55" in stderr:
+            return "Java runtime is too old for opendataloader-pdf; install Java 11+"
+        if stderr:
+            return f"opendataloader-pdf failed: {stderr[:500]}"
+    return f"opendataloader-pdf failed: {exc.__class__.__name__}: {exc}"
 
 
 def _extract_markdown_from_result(result: Any) -> str:
@@ -343,6 +409,6 @@ def _normalize_text(text: str) -> str:
 def _infer_title(text: str, default_title: str) -> str:
     for line in text.splitlines()[:20]:
         line = line.strip().lstrip("#").strip()
-        if len(line) >= 4 and not re.fullmatch(r"(?:第)?\d{1,4}(?:页)?", line):
+        if len(line) >= 4 and not re.fullmatch(r"(?:第\s*)?\d{1,4}\s*(?:页|page)?", line, flags=re.IGNORECASE):
             return line[:120]
     return default_title

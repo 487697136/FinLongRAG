@@ -20,6 +20,7 @@ function Find-CondaExe {
         return $Preferred
     }
     $candidates = @(
+        "E:\Anaconda3\Scripts\conda.exe",
         "D:\Anaconda3\Scripts\conda.exe",
         "$env:USERPROFILE\anaconda3\Scripts\conda.exe",
         "$env:USERPROFILE\miniconda3\Scripts\conda.exe",
@@ -191,7 +192,7 @@ function Ensure-PythonEnv {
 
     $check = @"
 import importlib
-for module in ["fastapi", "uvicorn", "sqlalchemy", "pydantic", "jwt", "cryptography"]:
+for module in ["fastapi", "uvicorn", "sqlalchemy", "pydantic", "jwt", "cryptography", "psycopg", "opendataloader_pdf", "pypdf"]:
     importlib.import_module(module)
 print("ok")
 "@
@@ -200,6 +201,58 @@ print("ok")
         Write-Step "Python dependencies look incomplete. Installing requirements..."
         Invoke-Native $PythonExe @("-m", "pip", "install", "-r", (Join-Path $ProjectRoot "requirements.txt")) "pip install requirements"
         Invoke-Native $PythonExe @("-m", "pip", "install", "-e", $ProjectRoot, "--no-deps") "pip install project"
+    }
+}
+
+function Ensure-JavaRuntime {
+    $javaCandidates = @(
+        "E:\Apps\Java\jdk-11",
+        $env:JAVA11_HOME,
+        $env:JAVA_HOME,
+        "E:\java_JDK\OpenJDK17U-jdk_x64_windows_hotspot_17.0.17_10\jdk-17.0.17+10"
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $_ "bin\java.exe")) }
+
+    foreach ($candidate in $javaCandidates) {
+        $javaExe = Join-Path $candidate "bin\java.exe"
+        $versionText = Get-JavaVersionText $javaExe
+        if ($versionText -match 'version "(\d+)(?:\.(\d+))?') {
+            $major = [int]$matches[1]
+            if ($major -eq 1 -and $matches[2]) { $major = [int]$matches[2] }
+            if ($major -ge 11) {
+                $env:JAVA_HOME = $candidate
+                $env:JAVA11_HOME = if (Test-Path -LiteralPath "E:\Apps\Java\jdk-11") { "E:\Apps\Java\jdk-11" } else { $candidate }
+                $env:Path = "$(Join-Path $candidate "bin");$env:Path"
+                Write-Step "Using Java $major from $candidate."
+                return
+            }
+        }
+    }
+
+    throw "Java 11+ is required for opendataloader-pdf. Install it under E:\Apps\Java\jdk-11 or set JAVA_HOME."
+}
+
+function Get-JavaVersionText {
+    param([string]$JavaExe)
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $JavaExe
+    $startInfo.Arguments = "-version"
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    try {
+        [void]$process.Start()
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        return (($stderr, $stdout) | Where-Object { $_ }) -join "`n"
+    }
+    finally {
+        $process.Dispose()
     }
 }
 
@@ -237,6 +290,7 @@ function Ensure-Frontend {
 Set-Location $ProjectRoot
 Ensure-EnvFile
 Ensure-PythonEnv
+Ensure-JavaRuntime
 Ensure-Frontend
 
 if (Test-PortOpen $HostName $Port) {

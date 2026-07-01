@@ -36,6 +36,7 @@ def allocate_evidence_budget(
     if intent and intent.get("dense_evidence"):
         max_chars = int(max_chars * 1.15)
         evidence_top_k = min(evidence_top_k + 2, 16)
+        rerank_top_k = max(evidence_top_k * settings.rerank_top_k_multiplier, evidence_top_k)
 
     # Long conversation history consumes prompt budget — trim evidence slightly.
     if history_chars > 1200:
