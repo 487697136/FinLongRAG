@@ -107,3 +107,54 @@ def test_sqlalchemy_repository_normalizes_legacy_task_stage_length():
 
     assert len(normalized) == 32
     assert normalized.startswith("parse:")
+
+
+def test_build_indexes_uses_incremental_vector_for_force_retry_without_reprocess(tmp_path: Path):
+    repository = MagicMock()
+    service = KnowledgeService(
+        settings=MagicMock(
+            object_storage_root=tmp_path,
+            project_root=tmp_path,
+            index_dir=tmp_path / "index",
+            processed_dir=tmp_path / "processed",
+            tokenizer_mode="mixed",
+            enable_vector_retrieval=True,
+        ),
+        repository=repository,
+    )
+    repository.load_chunks.return_value = [MagicMock(doc_id="doc-1", metadata={"document_id": "d1"})]
+
+    with patch.object(service, "get_knowledge_base", return_value=object()), patch(
+        "finlongrag.knowledge.service.BM25FIndex"
+    ) as bm25_cls, patch("finlongrag.knowledge.service.DocumentIndex") as doc_cls, patch(
+        "finlongrag.knowledge.service.faiss_index_exists",
+        return_value=True,
+    ), patch(
+        "finlongrag.knowledge.service.append_faiss_embeddings",
+        return_value={"appended": 1},
+    ) as append_vectors, patch(
+        "finlongrag.knowledge.service.build_faiss_embeddings"
+    ) as build_vectors, patch.object(service, "_publish_compatibility_indexes"), patch.object(
+        service, "_write_processed_snapshot"
+    ), patch.object(
+        service.repository,
+        "create_index_version",
+        return_value=MagicMock(index_version_id="v1"),
+    ), patch.object(
+        service.repository,
+        "activate_index_version",
+        return_value=MagicMock(index_version_id="v1", status="active"),
+    ), patch(
+        "finlongrag.knowledge.service.merge_global_indexes",
+        return_value={},
+    ):
+        bm25_cls.build.return_value = MagicMock()
+        doc_cls.build.return_value = MagicMock()
+        service.build_indexes(
+            kb_id="kb1",
+            incremental_document_ids=["d1"],
+            force_vector_rebuild=False,
+        )
+
+    append_vectors.assert_called_once()
+    build_vectors.assert_not_called()

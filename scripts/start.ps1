@@ -20,7 +20,7 @@ function Find-CondaExe {
         return $Preferred
     }
     $candidates = @(
-        "E:\Anaconda3\Scripts\conda.exe",
+        "D:\Anaconda3\Scripts\conda.exe",
         "D:\Anaconda3\Scripts\conda.exe",
         "$env:USERPROFILE\anaconda3\Scripts\conda.exe",
         "$env:USERPROFILE\miniconda3\Scripts\conda.exe",
@@ -206,11 +206,18 @@ print("ok")
 
 function Ensure-JavaRuntime {
     $javaCandidates = @(
-        "E:\Apps\Java\jdk-11",
+        "D:\Apps\Java\jdk-11",
+        "C:\Program Files\Java\jdk-11",
         $env:JAVA11_HOME,
         $env:JAVA_HOME,
-        "E:\java_JDK\OpenJDK17U-jdk_x64_windows_hotspot_17.0.17_10\jdk-17.0.17+10"
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $_ "bin\java.exe")) }
+        "D:\java_JDK\OpenJDK17U-jdk_x64_windows_hotspot_17.0.17_10\jdk-17.0.17+10"
+    ) | Where-Object {
+        if (-not $_) { return $false }
+        if ($_ -match '^([A-Za-z]):') {
+            if (-not (Get-PSDrive -Name $matches[1] -PSProvider FileSystem -ErrorAction SilentlyContinue)) { return $false }
+        }
+        Test-Path -LiteralPath (Join-Path $_ "bin\java.exe")
+    }
 
     foreach ($candidate in $javaCandidates) {
         $javaExe = Join-Path $candidate "bin\java.exe"
@@ -220,7 +227,7 @@ function Ensure-JavaRuntime {
             if ($major -eq 1 -and $matches[2]) { $major = [int]$matches[2] }
             if ($major -ge 11) {
                 $env:JAVA_HOME = $candidate
-                $env:JAVA11_HOME = if (Test-Path -LiteralPath "E:\Apps\Java\jdk-11") { "E:\Apps\Java\jdk-11" } else { $candidate }
+                $env:JAVA11_HOME = if (Test-Path -LiteralPath "C:\Program Files\Java\jdk-11") { "C:\Program Files\Java\jdk-11" } elseif (Test-Path -LiteralPath "D:\Apps\Java\jdk-11") { "D:\Apps\Java\jdk-11" } else { $candidate }
                 $env:Path = "$(Join-Path $candidate "bin");$env:Path"
                 Write-Step "Using Java $major from $candidate."
                 return
@@ -228,7 +235,7 @@ function Ensure-JavaRuntime {
         }
     }
 
-    throw "Java 11+ is required for opendataloader-pdf. Install it under E:\Apps\Java\jdk-11 or set JAVA_HOME."
+    throw "Java 11+ is required for opendataloader-pdf. Install it under C:\Program Files\Java\jdk-11 or set JAVA_HOME."
 }
 
 function Get-JavaVersionText {
@@ -256,6 +263,43 @@ function Get-JavaVersionText {
     }
 }
 
+function Test-FrontendSourcesStale {
+    param([string]$DistIndex)
+
+    if (-not (Test-Path -LiteralPath $DistIndex)) {
+        return $true
+    }
+
+    $distTime = (Get-Item -LiteralPath $DistIndex).LastWriteTimeUtc
+    $watchPaths = @(
+        (Join-Path $FrontendRoot "src"),
+        (Join-Path $FrontendRoot "public"),
+        (Join-Path $FrontendRoot "index.html"),
+        (Join-Path $FrontendRoot "vite.config.js"),
+        (Join-Path $FrontendRoot "package.json")
+    )
+
+    foreach ($watchPath in $watchPaths) {
+        if (-not (Test-Path -LiteralPath $watchPath)) {
+            continue
+        }
+        $item = Get-Item -LiteralPath $watchPath
+        if ($item.PSIsContainer) {
+            $newer = Get-ChildItem -LiteralPath $watchPath -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.LastWriteTimeUtc -gt $distTime } |
+                Select-Object -First 1
+            if ($newer) {
+                return $true
+            }
+        }
+        elseif ($item.LastWriteTimeUtc -gt $distTime) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Ensure-Frontend {
     if ($SkipFrontendBuild) {
         return
@@ -280,10 +324,16 @@ function Ensure-Frontend {
     if (-not $needsBuild -and (Test-Path -LiteralPath $packageLock)) {
         $needsBuild = (Get-Item -LiteralPath $packageLock).LastWriteTimeUtc -gt (Get-Item -LiteralPath $distIndex).LastWriteTimeUtc
     }
+    if (-not $needsBuild) {
+        $needsBuild = Test-FrontendSourcesStale -DistIndex $distIndex
+    }
 
     if ($needsBuild) {
         Write-Step "Building frontend..."
         Invoke-Native "npm" @("run", "build") "npm run build" $FrontendRoot
+        if (Test-PortOpen $HostName $Port) {
+            Write-Step "Frontend rebuilt while service is running. Hard-refresh the browser (Ctrl+F5) to load the new assets."
+        }
     }
 }
 
