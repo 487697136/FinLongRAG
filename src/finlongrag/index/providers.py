@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
 import numpy as np
+import requests
 
 from finlongrag.core.config import Settings, get_api_key
 from finlongrag.index.vector import EmbeddingProvider
@@ -27,6 +28,7 @@ class DashScopeEmbeddingProvider:
     batch_size: int = 16
     name: str = "dashscope"
     timeout_seconds: int = 120
+    max_retries: int = 2
 
     def embed(self, text: str) -> np.ndarray:
         vectors = self.embed_batch([text])
@@ -38,7 +40,7 @@ class DashScopeEmbeddingProvider:
             return np.zeros((0, self.dimension), dtype=np.float32)
         rows: list[np.ndarray] = []
         for start in range(0, len(cleaned), max(1, self.batch_size)):
-            rows.extend(self._embed_batch_once(cleaned[start : start + self.batch_size]))
+            rows.extend(self._embed_batch_resilient(cleaned[start : start + self.batch_size]))
         matrix = np.vstack(rows).astype(np.float32)
         if matrix.shape[1] != self.dimension:
             raise EmbeddingProviderError(
@@ -46,28 +48,43 @@ class DashScopeEmbeddingProvider:
             )
         return matrix
 
+    def _embed_batch_resilient(self, texts: list[str]) -> list[np.ndarray]:
+        try:
+            return self._embed_batch_once(texts)
+        except EmbeddingProviderError:
+            if len(texts) <= 1:
+                raise
+            mid = len(texts) // 2
+            return self._embed_batch_resilient(texts[:mid]) + self._embed_batch_resilient(texts[mid:])
+
     def _embed_batch_once(self, texts: list[str]) -> list[np.ndarray]:
         api_key = get_api_key() or self.api_key
         if not api_key:
             raise EmbeddingProviderError("DASHSCOPE_API_KEY is required for embedding requests")
-        # DashScope native API format
         payload: dict[str, Any] = {
             "model": self.model,
             "input": {
                 "texts": texts
-            }
+            },
         }
-        # Complete URL: base + /text-embedding/text-embedding
         url = self.base_url.rstrip("/") + "/text-embedding/text-embedding"
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        try:
-            response = httpx.post(url, headers=headers, json=payload, timeout=self.timeout_seconds)
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise EmbeddingProviderError(f"DashScope embedding request failed: {exc}") from exc
-        data = response.json()
 
-        # DashScope returns output.embeddings
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=self.timeout_seconds)
+                response.raise_for_status()
+                data = response.json()
+                return self._parse_embedding_response(data, texts)
+            except Exception as exc:
+                last_error = exc
+                if attempt >= self.max_retries:
+                    break
+                time.sleep(1.5 * (attempt + 1))
+        raise EmbeddingProviderError(f"DashScope embedding request failed: {last_error}") from last_error
+
+    def _parse_embedding_response(self, data: dict[str, Any], texts: list[str]) -> list[np.ndarray]:
         output = data.get("output", {})
         items = output.get("embeddings")
         if not isinstance(items, list):
@@ -94,9 +111,7 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
             raise EmbeddingProviderError(
                 "DASHSCOPE_API_KEY is required when FINLONGRAG_VECTOR_EMBEDDING_PROVIDER=dashscope"
             )
-        # Base URL without /text-embedding, that gets appended in _embed_batch_once
         base_url = "https://dashscope.aliyuncs.com/api/v1/services/embeddings"
-        # text-embedding-v3/v4 allow at most 10 texts per request.
         batch_size = min(settings.vector_batch_size, 10)
         return DashScopeEmbeddingProvider(
             api_key=api_key,
@@ -105,5 +120,6 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
             dimension=settings.vector_dimension,
             batch_size=batch_size,
             timeout_seconds=settings.request_timeout_seconds,
+            max_retries=settings.max_retries,
         )
     raise EmbeddingProviderError(f"unsupported embedding provider: {settings.vector_embedding_provider}")

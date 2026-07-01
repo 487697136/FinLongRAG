@@ -211,6 +211,7 @@ class KnowledgeService:
         newly_processed_doc_ids: list[str] = []
         reprocessed_doc_ids: list[str] = []
         current_document: KnowledgeDocumentRecord | None = None
+        index_stage_failed = False
         try:
             for document_record in documents:
                 current_document = document_record
@@ -307,11 +308,15 @@ class KnowledgeService:
                     total_chunks=total_chunks,
                     metadata={"current_document_id": "", "current_doc_id": ""},
                 )
-                index_info = self.build_indexes(
-                    kb_id=task.kb_id,
-                    incremental_document_ids=newly_processed_doc_ids,
-                    force_vector_rebuild=bool(reprocessed_doc_ids) or force,
-                )
+                try:
+                    index_info = self.build_indexes(
+                        kb_id=task.kb_id,
+                        incremental_document_ids=newly_processed_doc_ids,
+                        force_vector_rebuild=bool(reprocessed_doc_ids),
+                    )
+                except Exception:
+                    index_stage_failed = True
+                    raise
                 for document_record in all_documents:
                     if document_record.status in {"chunked", "indexed"} or document_record.document_id in {
                         *newly_processed_doc_ids,
@@ -354,7 +359,7 @@ class KnowledgeService:
                 error=str(exc),
                 finished=True,
             )
-            if current_document is not None:
+            if current_document is not None and not index_stage_failed:
                 self.repository.update_document_state(
                     current_document.document_id,
                     status="failed",

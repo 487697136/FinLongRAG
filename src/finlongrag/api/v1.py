@@ -485,7 +485,19 @@ def create_v1_router(
         safe_name = f"{uuid.uuid4().hex}_{Path(file.filename).name}"
         target = upload_dir / safe_name
         target.write_bytes(payload_bytes)
+        content_hash = hashlib.sha256(payload_bytes).hexdigest()
         try:
+            for existing in knowledge_service_provider().list_documents(kb_id, limit=10000):
+                if existing.content_hash == content_hash:
+                    target.unlink(missing_ok=True)
+                    needs_reparse = existing.status not in {"chunked", "indexed"}
+                    submit_ingestion(
+                        kb_id,
+                        build_index=True,
+                        document_ids=[existing.document_id],
+                        force=needs_reparse,
+                    )
+                    return _document_payload(existing)
             doc = knowledge_service_provider().register_local_document(
                 kb_id=kb_id,
                 path=target,
@@ -534,7 +546,16 @@ def create_v1_router(
             raise HTTPException(status_code=404, detail="Document not found.")
         # 所属权检查
         get_user_kb(knowledge_service_provider(), doc.kb_id, user.id)
-        return {"message": "Document reprocess submitted.", **submit_ingestion(doc.kb_id, build_index=True, document_ids=[doc.document_id], force=True)}
+        needs_reparse = doc.status not in {"chunked", "indexed"}
+        return {
+            "message": "Document reprocess submitted.",
+            **submit_ingestion(
+                doc.kb_id,
+                build_index=True,
+                document_ids=[doc.document_id],
+                force=needs_reparse,
+            ),
+        }
 
     @router.get("/documents/{document_id}/progress")
     def document_progress(document_id: str, user: User = Depends(current_user)) -> dict[str, Any]:
